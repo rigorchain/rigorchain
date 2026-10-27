@@ -21,6 +21,7 @@ import {
   optionalString,
 } from "./rpcFields";
 import { upsertRfc018FeeBurnStats, backfillMissingRfc018FeeBurn } from "./rfc018FeeBurnStore";
+import { withDbTransaction } from "./dbTransaction";
 import { rfc018DestroyedFeeOru, type IndexedPrevout } from "./rfc018FeeBurn";
 
 type TxVinWitness = string[] | null;
@@ -404,10 +405,12 @@ async function importBlockAtHeight(
     }),
   };
 
-  // Determinism: keep importer inside a single DB transaction per block.
-  await pool.query("BEGIN");
-  try {
-    await pool.query(
+  // pool.query() checks out a different session per call. BEGIN on one
+  // connection does not cover inserts on another, and ROLLBACK then deletes
+  // only the rows that shared the BEGIN session. Height 1399 committed the
+  // witness output and lost coinbase vout 0 that way.
+  return withDbTransaction(pool, async (client) => {
+    await client.query(
       `
         INSERT INTO blocks(
           block_hash, height, time, bits, res_probability_target,
@@ -487,7 +490,7 @@ async function importBlockAtHeight(
       const locktime = tx?.locktime != null ? BigInt(tx.locktime) : null;
 
       // FK correctness: outputs/input rows reference transactions(txid).
-      await pool.query(
+      await client.query(
         `
           INSERT INTO transactions(txid, wtxid, block_hash, block_height, block_tx_index, version, locktime, is_coinbase, raw_hex)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -560,7 +563,7 @@ async function importBlockAtHeight(
         };
         vouts.push(outMeta);
 
-        await pool.query(
+        await client.query(
           `
             INSERT INTO outputs(txid, vout_index, value_atoms, asset_kind, script_pubkey, address, witness_version, program_hex)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8)
@@ -586,7 +589,7 @@ async function importBlockAtHeight(
 
         // Circulating ORU UTXO index: skip OP_CONVERGE. Node AddCoins also omits IsConvergenceScript.
         if (asset_kind === "ORU" && !isConvergenceScriptPubKey(scriptPubKeyHex)) {
-          await pool.query(
+          await client.query(
             `
               INSERT INTO oru_utxos(txid, vout_index, height, amount_atoms, script_pubkey, address, spent, spending_txid, spending_vin_index)
               VALUES($1,$2,$3,$4,$5,$6,FALSE,NULL,NULL)
@@ -646,7 +649,7 @@ async function importBlockAtHeight(
       // A-8: this block's F is the next window. Do not attribute the payout to this block's winner.
       const mintAmountAtoms = 0n;
 
-      await pool.query(
+      await client.query(
         `
           INSERT INTO convergence_events(
             block_hash, block_height, convergence_txid,
@@ -699,7 +702,7 @@ async function importBlockAtHeight(
         height,
       });
       for (const o of mint.outputs) {
-        await pool.query(
+        await client.query(
           `
             INSERT INTO res_mints(
               mint_txid, mint_vout_index,
@@ -748,7 +751,7 @@ async function importBlockAtHeight(
           ],
         );
       }
-      await pool.query(
+      await client.query(
         `UPDATE convergence_events SET mint_amount = $1 WHERE convergence_txid = $2 AND block_height = $3`,
         [mint.amountAtoms, mint.mintTxid, BigInt(height)],
       );
@@ -762,7 +765,7 @@ async function importBlockAtHeight(
       const prevouts: Array<IndexedPrevout | null> = [];
 
       for (const vin of tx.vins) {
-        await pool.query(
+        await client.query(
           `
             INSERT INTO inputs(txid, vin_index, prev_txid, prev_vout, sequence, coinbase, txinwitness, script_sig)
             VALUES($1,$2,$3,$4,$5,$6,$7,$8)
@@ -790,7 +793,7 @@ async function importBlockAtHeight(
           prevouts.push(null);
           continue;
         }
-        const prev = await pool.query<{ asset_kind: string; value_atoms: string }>(
+        const prev = await client.query<{ asset_kind: string; value_atoms: string }>(
           `SELECT asset_kind, value_atoms::text AS value_atoms FROM outputs WHERE txid = $1 AND vout_index = $2`,
           [vin.prev_txid, vin.prev_vout],
         );
@@ -806,7 +809,7 @@ async function importBlockAtHeight(
         }
 
         if (prevAsset === "ORU") {
-          await pool.query(
+          await client.query(
             `
               UPDATE oru_utxos
               SET spent = TRUE,
@@ -834,7 +837,7 @@ async function importBlockAtHeight(
       if (!mintTxids.has(tx.txid) && firstResInput) {
         const resOutputs = tx.vouts.filter((o) => o.asset_kind === "RES");
         for (const o of resOutputs) {
-          await pool.query(
+          await client.query(
             `
               INSERT INTO res_transfers(
                 spend_txid, spend_vin_index, spend_block_hash,
@@ -865,13 +868,26 @@ async function importBlockAtHeight(
       }
     }
 
-    await upsertRfc018FeeBurnStats(pool, BigInt(height), blockHash, blockRfc018Burn);
 
-    await pool.query("COMMIT");
+    for (const tx of parsedTxs) {
+      const outCount = await client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM outputs WHERE txid = $1`,
+        [tx.txid],
+      );
+      const inCount = await client.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM inputs WHERE txid = $1`,
+        [tx.txid],
+      );
+      if (Number(outCount.rows[0]?.n ?? -1) !== tx.vouts.length || Number(inCount.rows[0]?.n ?? -1) !== tx.vins.length) {
+        throw new Error(
+          `block ${height} tx ${tx.txid} index incomplete: outputs ${outCount.rows[0]?.n}/${tx.vouts.length} inputs ${inCount.rows[0]?.n}/${tx.vins.length}`,
+        );
+      }
+    }
+
+    await upsertRfc018FeeBurnStats(client, BigInt(height), blockHash, blockRfc018Burn);
+
     return { blockHash, mismatch };
-  } catch (e) {
-    await pool.query("ROLLBACK");
-    throw e;
-  }
+  });
 }
 

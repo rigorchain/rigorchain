@@ -3,7 +3,7 @@
  * (CASCADE). Remaining prefix cumulative_burned_oru stays correct.
  */
 
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import {
   nextCumulativeBurn,
   rfc018DestroyedFeeOru,
@@ -13,7 +13,7 @@ import {
 } from "./rfc018FeeBurn";
 
 export async function upsertRfc018FeeBurnStats(
-  pool: Pool,
+  pool: Pool | PoolClient,
   height: bigint,
   blockHash: string,
   burnedOru: bigint,
