@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { injectSsrResPage, injectSsrRoot, renderBlockRoot, renderResPageSsr, renderStatusRoot, renderTxRoot } from "./uiSsr";
+import { injectSsrResPage, injectSsrRoot, renderBlockRoot, renderBlocksRoot, renderResPageSsr, renderStatusRoot, renderTxRoot } from "./uiSsr";
+import { formatBlockHeaderTimeUtc } from "./relativeTime";
 import { CONVERGENCE_LOCK_DESTINATION_LABEL } from "./txSummary";
 import { OP_CONVERGE_SCRIPT_NAME } from "./script";
 
@@ -387,5 +388,60 @@ describe("uiSsr", () => {
     assert.match(html, /RES mint ceiling/);
     assert.equal((html.match(/<svg class="res-curve"/g) || []).length, 2);
     assert.doesNotMatch(html, /does not publish the issuance equation/);
+  });
+
+  it("shows the original UTC header time, with relative time only as a supplement", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const pastTime = now - 7 * 60 - 30;
+    const past = renderBlockRoot(
+      { block: { height: 1, block_hash: "aa", time: pastTime }, summary: { height: 1, hash: "aa", time: pastTime }, txs: [] },
+      "aa",
+    );
+    assert.match(past, /Block header time \(UTC\)/);
+    assert.match(past, new RegExp(formatBlockHeaderTimeUtc(pastTime).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(past, /7 minutes ago/);
+    assert.doesNotMatch(past, /Relative time is calculated from the explorer's current clock/);
+
+    const future = now + 16 * 60 + 30;
+    const ahead = renderBlockRoot(
+      { block: { height: 1450, block_hash: "a8b82b03", time: future }, summary: { height: 1450, hash: "a8b82b03", time: future }, txs: [] },
+      "a8b82b03",
+    );
+    assert.match(ahead, /Block header time \(UTC\)/);
+    assert.match(ahead, new RegExp(formatBlockHeaderTimeUtc(future).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(ahead, /in 16 minutes/);
+    assert.doesNotMatch(ahead, /just now/);
+    assert.doesNotMatch(ahead, /INVALID BLOCK|BAD TIMESTAMP|MINER ERROR/);
+  });
+
+  it("keeps height order and each block's own header time when a later height is earlier", () => {
+    const html = renderBlocksRoot([
+      { height: 1452, block_hash: "cdaf09f0", time: 1793102162 },
+      { height: 1451, block_hash: "48a50e33", time: 1793102138 },
+      { height: 1450, block_hash: "a8b82b03", time: 1793104113 },
+    ]);
+    const i1452 = html.indexOf(">1452<");
+    const i1451 = html.indexOf(">1451<");
+    const i1450 = html.indexOf(">1450<");
+    assert.ok(i1452 >= 0 && i1451 > i1452 && i1450 > i1451);
+    const row1451 = html.slice(i1451, html.indexOf("</tr>", i1451));
+    assert.match(row1451, /2026-10-27 11:55:38 UTC/);
+    assert.doesNotMatch(row1451, /12:28:33/);
+    const row1450 = html.slice(i1450, html.indexOf("</tr>", i1450));
+    assert.match(row1450, /2026-10-27 12:28:33 UTC/);
+    assert.match(html, /2026-10-27 11:56:02 UTC/);
+
+    const detail1450 = renderBlockRoot(
+      { block: { height: 1450, time: 1793104113 }, summary: { height: 1450, hash: "a8", time: 1793104113 }, txs: [] },
+      "a8",
+    );
+    const detail1451 = renderBlockRoot(
+      { block: { height: 1451, time: 1793102138 }, summary: { height: 1451, hash: "48", time: 1793102138 }, txs: [] },
+      "48",
+    );
+    assert.match(detail1450, /2026-10-27 12:28:33 UTC/);
+    assert.doesNotMatch(detail1450, /11:55:38/);
+    assert.match(detail1451, /2026-10-27 11:55:38 UTC/);
+    assert.doesNotMatch(detail1451, /12:28:33/);
   });
 });

@@ -11,6 +11,7 @@ import { convergeOutputNote, destinationLabel } from "./txSummary";
 import { atomsToResDisplay, formatFixedAtoms } from "./amount";
 import { renderResIssuanceChartsHtml } from "./resIssuanceCharts";
 import { BLOCKS_PER_YEAR, buildRfc020Curve } from "./resIssuanceSchedule";
+import { formatBlockHeaderTimeUtc, formatRelativeTime } from "./relativeTime";
 
 export function escapeHtml(s: unknown): string {
   return String(s ?? "")
@@ -36,23 +37,20 @@ function nestedField(obj: unknown, ...keys: string[]): unknown {
 }
 
 function timeAgo(unixSeconds: unknown): string {
-  const t = Number(unixSeconds);
-  if (!Number.isFinite(t) || t <= 0) return "—";
-  const diff = Math.max(0, Math.floor(Date.now() / 1000 - t));
-  if (diff < 5) return "just now";
-  if (diff < 60) return `${diff} second${diff === 1 ? "" : "s"} ago`;
-  const minutes = Math.floor(diff / 60);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
+  return formatRelativeTime(unixSeconds);
 }
 
-function timeAbsolute(unixSeconds: unknown): string {
-  const t = Number(unixSeconds);
-  if (!Number.isFinite(t) || t <= 0) return "";
-  return new Date(t * 1000).toISOString();
+function blockHeaderTimeCell(unixSeconds: unknown): string {
+  const abs = formatBlockHeaderTimeUtc(unixSeconds);
+  if (!abs) return "—";
+  const rel = timeAgo(unixSeconds);
+  return `${escapeHtml(abs)}<div class="muted">${escapeHtml(rel)}</div>`;
+}
+
+function timeListCell(unixSeconds: unknown): string {
+  const abs = formatBlockHeaderTimeUtc(unixSeconds);
+  if (!abs) return "—";
+  return `<span title="${escapeHtml(abs)}">${escapeHtml(timeAgo(unixSeconds))}</span>`;
 }
 
 export function injectSsrRoot(templateHtml: string, innerHtml: string): string {
@@ -113,7 +111,6 @@ export function renderBlockRoot(data: Record<string, unknown>, hash: string): st
   const fp = String(s.consensus_fingerprint_display ?? b.consensus_fingerprint_display ?? "Not available");
   const fpStatus = String(s.consensus_fingerprint_status ?? b.consensus_fingerprint_status ?? "Not available");
   const t = s.time ?? b.time;
-  const abs = timeAbsolute(t);
   const rows = txs
     .map((tx, idx) => {
       return `<tr>
@@ -144,7 +141,7 @@ export function renderBlockRoot(data: Record<string, unknown>, hash: string): st
       <tr><th>Hash</th><td class="mono">${escapeHtml(blockHash)}</td></tr>
       <tr><th>nBits</th><td class="mono">${escapeHtml(s.bits ?? b.bits ?? "N/A")}</td></tr>
       <tr><th>OpuHash</th><td class="mono">${escapeHtml(s.opus_hash ?? b.opus_hash ?? b.pow_hash ?? "N/A")}</td></tr>
-      <tr><th>Time</th><td>${escapeHtml(timeAgo(t))}${abs ? ` <span class="muted">(${escapeHtml(abs)})</span>` : ""}</td></tr>
+      <tr><th>Block header time (UTC)</th><td>${blockHeaderTimeCell(t)}</td></tr>
       <tr><th>Coinbase</th><td class="mono">${s.coinbase_txid ? `<a href="/tx/${encodeURIComponent(String(s.coinbase_txid))}">${escapeHtml(s.coinbase_txid)}</a>` : ""}</td></tr>
       <tr><th>ORU subsidy</th><td>${escapeHtml(s.oru_subsidy_display ?? "N/A")}</td></tr>
       <tr><th>Fees destroyed (this block)</th><td>${escapeHtml(
@@ -275,7 +272,7 @@ export function renderBlocksRoot(
       (b) => `<tr>
         <td>${escapeHtml(b.height)}</td>
         <td><a href="/block/${encodeURIComponent(String(b.block_hash ?? ""))}">${escapeHtml(shortHash(b.block_hash))}</a></td>
-        <td>${escapeHtml(timeAgo(b.time))}</td>
+        <td>${timeListCell(b.time)}</td>
         <td>${escapeHtml(b.tx_count)}</td>
         <td>${escapeHtml(b.oru_minted_display ?? b.oru_minted ?? "—")}</td>
         <td>${escapeHtml(b.res_minted_display ?? "—")}</td>

@@ -41,31 +41,60 @@
     el.innerHTML = navHtml();
   }
 
-  function plural(n, unit) {
-    return n === 1 ? `1 ${unit} ago` : `${n} ${unit}s ago`;
+  function relativePhrase(n, unit, future) {
+    const body = n === 1 ? `1 ${unit}` : `${n} ${unit}s`;
+    return future ? `in ${body}` : `${body} ago`;
   }
 
-  function timeAgo(unixSeconds) {
+  function timeAgo(unixSeconds, nowSeconds) {
     const t = Number(unixSeconds);
     if (!Number.isFinite(t) || t <= 0) return "—";
-    const diff = Math.max(0, Math.floor(Date.now() / 1000 - t));
+    const now =
+      arguments.length > 1 && Number.isFinite(Number(nowSeconds))
+        ? Number(nowSeconds)
+        : Date.now() / 1000;
+    const signed = Math.floor(now - t);
+    if (!Number.isFinite(signed)) return "—";
+    if (signed < 0) {
+      const ahead = -signed;
+      if (ahead < 60) return relativePhrase(ahead, "second", true);
+      const minutes = Math.floor(ahead / 60);
+      if (minutes < 60) return relativePhrase(minutes, "minute", true);
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return relativePhrase(hours, "hour", true);
+      const days = Math.floor(hours / 24);
+      if (days < 30) return relativePhrase(days, "day", true);
+      const months = Math.floor(days / 30);
+      if (months < 12) return relativePhrase(months, "month", true);
+      return relativePhrase(Math.floor(days / 365), "year", true);
+    }
+    const diff = signed;
     if (diff < 5) return "just now";
-    if (diff < 60) return plural(diff, "second");
+    if (diff < 60) return relativePhrase(diff, "second", false);
     const minutes = Math.floor(diff / 60);
-    if (minutes < 60) return plural(minutes, "minute");
+    if (minutes < 60) return relativePhrase(minutes, "minute", false);
     const hours = Math.floor(minutes / 60);
-    if (hours < 24) return plural(hours, "hour");
+    if (hours < 24) return relativePhrase(hours, "hour", false);
     const days = Math.floor(hours / 24);
-    if (days < 30) return plural(days, "day");
+    if (days < 30) return relativePhrase(days, "day", false);
     const months = Math.floor(days / 30);
-    if (months < 12) return plural(months, "month");
-    return plural(Math.floor(days / 365), "year");
+    if (months < 12) return relativePhrase(months, "month", false);
+    return relativePhrase(Math.floor(days / 365), "year", false);
   }
 
   function timeAbsolute(unixSeconds) {
     const t = Number(unixSeconds);
     if (!Number.isFinite(t) || t <= 0) return "";
-    return new Date(t * 1000).toLocaleString();
+    const whole = Math.trunc(t);
+    const iso = new Date(whole * 1000).toISOString();
+    return iso.slice(0, 19).replace("T", " ") + " UTC";
+  }
+
+  function blockTimeDetailHtml(unixSeconds, nowSeconds) {
+    const abs = timeAbsolute(unixSeconds);
+    if (!abs) return "—";
+    const rel = timeAgo(unixSeconds, nowSeconds);
+    return abs + '<div class="muted">' + rel + "</div>";
   }
 
   function fetchJson(url, timeoutMs) {
@@ -79,11 +108,12 @@
     });
   }
 
-  function timeCellHtml(unixSeconds) {
+  function timeCellHtml(unixSeconds, nowSeconds) {
     const abs = timeAbsolute(unixSeconds);
     if (!abs) return "—";
     const title = abs.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-    return `<span title="${title}">${timeAgo(unixSeconds)}</span>`;
+    const rel = arguments.length > 1 ? timeAgo(unixSeconds, nowSeconds) : timeAgo(unixSeconds);
+    return `<span title="${title}">${rel}</span>`;
   }
 
   window.ExplorerRoutes = {
@@ -97,6 +127,7 @@
     mountNav,
     timeAgo,
     timeAbsolute,
+    blockTimeDetailHtml,
     timeCellHtml,
     fetchJson,
     apiBase: "/api",

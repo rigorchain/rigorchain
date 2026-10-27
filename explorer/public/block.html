@@ -96,7 +96,7 @@
               <tr><th>Hash</th><td class="mono">${s.hash ?? b.block_hash}</td></tr>
               <tr><th>nBits</th><td class="mono">${s.bits ?? b.bits ?? 'N/A'}</td></tr>
               <tr><th>OpuHash</th><td class="mono">${s.opus_hash ?? b.opus_hash ?? b.pow_hash ?? 'N/A'}</td></tr>
-              <tr><th>Time</th><td>${ExplorerRoutes.timeAgo(s.time ?? b.time)}${ExplorerRoutes.timeAbsolute(s.time ?? b.time) ? ` <span class="muted">(${ExplorerRoutes.timeAbsolute(s.time ?? b.time)})</span>` : ""}</td></tr>
+              <tr><th>Block header time (UTC)</th><td>${ExplorerRoutes.blockTimeDetailHtml(s.time ?? b.time)}</td></tr>
               <tr><th>Coinbase</th><td class="mono">${s.coinbase_txid ? `<a href="${ExplorerRoutes.txPath(s.coinbase_txid)}">${s.coinbase_txid}</a>` : ''}</td></tr>
               <tr><th>ORU subsidy</th><td>${s.oru_subsidy_display ?? 'N/A'}</td></tr>
               <tr><th>RES minted</th><td>${s.res_minted_display ?? '0'}</td></tr>
