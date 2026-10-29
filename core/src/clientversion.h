@@ -38,7 +38,7 @@ static const int CLIENT_VERSION =
 extern const std::string CLIENT_NAME;
 
 /** Product release identity (tag / installer / About). Not the packed CLIENT_VERSION integer. */
-inline constexpr const char* RIGOR_RELEASE_VERSION = "v0.2";
+inline constexpr const char* RIGOR_RELEASE_VERSION = "v0.2.1";
 inline constexpr const char* RIGOR_RELEASE_CODENAME = "Production Release";
 
 std::string FormatFullVersion();

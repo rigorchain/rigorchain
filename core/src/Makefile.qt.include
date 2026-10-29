@@ -138,6 +138,8 @@ BITCOIN_QT_H = \
   qt/bitcoingui.h \
   qt/bitcoinunits.h \
   qt/clientmodel.h \
+  qt/tipnotifycoalescer.h \
+  qt/tipnotifyflush.h \
   qt/coincontroldialog.h \
   qt/coincontroltreewidget.h \
   qt/createwalletdialog.h \

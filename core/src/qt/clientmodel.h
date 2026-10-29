@@ -11,6 +11,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <qt/tipnotifycoalescer.h>
 #include <sync.h>
 #include <uint256.h>
 
@@ -114,9 +115,16 @@ private:
     //! A thread to interact with m_node asynchronously
     QThread* const m_thread;
 
-    void TipChanged(SynchronizationState sync_state, interfaces::BlockTip tip, double verification_progress, SyncType synctype) EXCLUSIVE_LOCKS_REQUIRED(!m_cached_tip_mutex);
+    void TipChanged(SynchronizationState sync_state, interfaces::BlockTip tip, double verification_progress, SyncType synctype) EXCLUSIVE_LOCKS_REQUIRED(!m_cached_tip_mutex, !m_tip_coalesce_mutex);
+    void EmitNumBlocksChanged(const TipNotifyCoalescer::Snapshot& snap);
+    //! Queue the single trailing flush onto this object's thread. Qt drops it if this is destroyed.
+    void ScheduleTipFlush(bool block_channel, int64_t delay_ms);
+    void FlushCoalescedTip(bool block_channel) EXCLUSIVE_LOCKS_REQUIRED(!m_tip_coalesce_mutex);
     void subscribeToCoreSignals();
     void unsubscribeFromCoreSignals();
+
+    Mutex m_tip_coalesce_mutex;
+    TipNotifyCoalescer m_tip_coalescer GUARDED_BY(m_tip_coalesce_mutex);
 
 Q_SIGNALS:
     void numConnectionsChanged(int count);

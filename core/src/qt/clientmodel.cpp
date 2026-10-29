@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/clientmodel.h>
+#include <qt/tipnotifyflush.h>
 
 #include <qt/bantablemodel.h>
 #include <qt/guiconstants.h>
@@ -28,14 +29,19 @@
 #include <QThread>
 #include <QTimer>
 
-static int64_t nLastHeaderTipUpdateNotification = 0;
-static int64_t nLastBlockTipUpdateNotification = 0;
+static_assert(static_cast<int>(SyncType::HEADER_PRESYNC) == TIPNOTIFY_SYNC_HEADER_PRESYNC);
+static_assert(static_cast<int>(SyncType::HEADER_SYNC) == TIPNOTIFY_SYNC_HEADER_SYNC);
+static_assert(static_cast<int>(SyncType::BLOCK_SYNC) == TIPNOTIFY_SYNC_BLOCK);
+static_assert(static_cast<int>(SynchronizationState::INIT_REINDEX) == TIPNOTIFY_STATE_INIT_REINDEX);
+static_assert(static_cast<int>(SynchronizationState::INIT_DOWNLOAD) == TIPNOTIFY_STATE_INIT_DOWNLOAD);
+static_assert(static_cast<int>(SynchronizationState::POST_INIT) == TIPNOTIFY_STATE_POST_INIT);
 
 ClientModel::ClientModel(interfaces::Node& node, OptionsModel *_optionsModel, QObject *parent) :
     QObject(parent),
     m_node(node),
     optionsModel(_optionsModel),
-    m_thread(new QThread(this))
+    m_thread(new QThread(this)),
+    m_tip_coalescer(count_milliseconds(MODEL_UPDATE_DELAY))
 {
     cachedBestHeaderHeight = -1;
     cachedBestHeaderTime = -1;
@@ -214,6 +220,29 @@ QString ClientModel::blocksDir() const
     return GUIUtil::PathToQString(gArgs.GetBlocksDirPath());
 }
 
+void ClientModel::EmitNumBlocksChanged(const TipNotifyCoalescer::Snapshot& snap)
+{
+    Q_EMIT numBlocksChanged(snap.height, QDateTime::fromSecsSinceEpoch(snap.block_time), snap.progress,
+                            static_cast<SyncType>(snap.sync_type), static_cast<SynchronizationState>(snap.sync_state));
+}
+
+void ClientModel::ScheduleTipFlush(bool block_channel, int64_t delay_ms)
+{
+    const int msec = delay_ms > 0 ? static_cast<int>(delay_ms) : 0;
+    ArmContextFlush(this, msec, [this, block_channel] { FlushCoalescedTip(block_channel); });
+}
+
+void ClientModel::FlushCoalescedTip(bool block_channel)
+{
+    std::optional<TipNotifyCoalescer::Snapshot> snap;
+    {
+        LOCK(m_tip_coalesce_mutex);
+        snap = block_channel ? m_tip_coalescer.FlushBlock(GetTimeMillis()) : m_tip_coalescer.FlushHeader(GetTimeMillis());
+    }
+    if (!snap) return;
+    EmitNumBlocksChanged(*snap);
+}
+
 void ClientModel::TipChanged(SynchronizationState sync_state, interfaces::BlockTip tip, double verification_progress, SyncType synctype)
 {
     if (synctype == SyncType::HEADER_SYNC) {
@@ -225,21 +254,36 @@ void ClientModel::TipChanged(SynchronizationState sync_state, interfaces::BlockT
         WITH_LOCK(m_cached_tip_mutex, m_cached_tip_blocks = tip.block_hash;);
     }
 
-    // Throttle GUI tip signals. Bitcoin Core only throttles during IBD/reindex; on RIGOR Alpha
+    // Throttle GUI tip signals. Bitcoin Core only throttles during IBD/reindex; on RIGOR
     // solo-mining (easy PoW) POST_INIT can still deliver many tips per second and freeze Qt.
-    // Always rate-limit BLOCK_SYNC paints; header sync/reindex keep the previous policy.
+    // Always rate-limit BLOCK_SYNC paints; header sync stays unthrottled except during reindex.
     // Cached tip fields above are still updated every call so polls see the latest height.
+    // A suppressed update arms one trailing flush so the newest tip is painted even if no
+    // further block arrives. Status bar and overlay both consume numBlocksChanged.
     const bool throttle =
         synctype == SyncType::BLOCK_SYNC ||
         sync_state == SynchronizationState::INIT_REINDEX;
-    const int64_t now = GetTimeMillis();
-    int64_t& nLastUpdateNotification = synctype != SyncType::BLOCK_SYNC ? nLastHeaderTipUpdateNotification : nLastBlockTipUpdateNotification;
-    if (throttle && now < nLastUpdateNotification + count_milliseconds(MODEL_UPDATE_DELAY)) {
-        return;
-    }
+    const bool block_channel = synctype == SyncType::BLOCK_SYNC;
+    const TipNotifyCoalescer::Snapshot snap{
+        tip.block_height,
+        tip.block_time,
+        verification_progress,
+        static_cast<int>(synctype),
+        static_cast<int>(sync_state),
+    };
 
-    Q_EMIT numBlocksChanged(tip.block_height, QDateTime::fromSecsSinceEpoch(tip.block_time), verification_progress, synctype, sync_state);
-    nLastUpdateNotification = now;
+    TipNotifyCoalescer::Decision decision;
+    {
+        LOCK(m_tip_coalesce_mutex);
+        decision = block_channel ? m_tip_coalescer.ObserveBlock(snap, throttle, GetTimeMillis())
+                                 : m_tip_coalescer.ObserveHeader(snap, throttle, GetTimeMillis());
+    }
+    if (decision.emit_now) {
+        EmitNumBlocksChanged(decision.emit_snapshot);
+    }
+    if (decision.schedule) {
+        ScheduleTipFlush(block_channel, decision.delay_ms);
+    }
 }
 
 void ClientModel::subscribeToCoreSignals()

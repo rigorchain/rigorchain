@@ -1,4 +1,4 @@
-; RIGOR Windows production installer (v0.2 display identity).
+; RIGOR Windows production installer (v0.2.1 display identity).
 ; Output: dist/alpha/windows/rigor-v0.2-windows.exe
 ; Build: bash scripts/alpha/build_alpha_windows_nsis.sh
 
@@ -13,7 +13,7 @@
   !define STAGING_DIR "${REPO_ROOT}/dist/alpha/windows/staging"
 !endif
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "0.2"
+  !define PRODUCT_VERSION "0.2.1"
 !endif
 !ifndef OUTFILE
   !define OUTFILE "${REPO_ROOT}/dist/alpha/windows/rigor-v0.2-windows.exe"
@@ -42,7 +42,7 @@ BrandingText "RIGOR v${PRODUCT_VERSION}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\rigor-wallet.exe"
 !define MUI_ABORTWARNING
 
-VIProductVersion 0.2.0.0
+VIProductVersion 0.2.1.0
 VIAddVersionKey ProductName "Rigor Wallet"
 VIAddVersionKey ProductVersion "${PRODUCT_VERSION}"
 VIAddVersionKey FileVersion "${PRODUCT_VERSION}"

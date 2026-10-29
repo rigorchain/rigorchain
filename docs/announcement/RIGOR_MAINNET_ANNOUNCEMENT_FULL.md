@@ -358,6 +358,7 @@ The node and the wallet can also be built from source (`./autogen.sh && ./config
 - **Website:** https://www.rigorchain.com/
 - **GitHub repository — the primary technical reference:** https://github.com/rigorchain/rigorchain
 - **Mainnet release:** https://github.com/rigorchain/rigorchain/releases/tag/v0.2-mainnet
+- **Latest wallet release:** https://github.com/rigorchain/rigorchain/releases/tag/v0.2.1 (Windows and Linux wallet packages; GUI synchronization-status fix, no consensus change)
 - **Explorer (observational, not consensus):** https://explorer.rigorchain.com/
 
 In the repository, the material that matters for the claims above is: `docs/architecture/RIGOR_ARCHITECTURE_PAPER.md` (the design motivation and the architecture in sections 1–2), `docs/whitepaper/RIGOR_PROTOCOL_WHITEPAPER.md` (full protocol narrative), `docs/protocol/RFC-020.md` (issuance specification, the cap derivation, and the schedule in section 7), `docs/protocol/RFC-018.md` (fee destroy), `core/src/consensus/res_issuance.h` and `core/src/consensus/rigor_consensus_lock.h` (the locked constants and their compile-time assertions), `core/src/kernel/chainparams.cpp` (genesis and network identity), `docs/SCRIPT_STRUCTURE.md` (the closed script surface), and `formal_verification/rigor_kernel/` (the Coq model and its inventory).

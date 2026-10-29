@@ -12,6 +12,7 @@
 #include <qt/test/apptests.h>
 #include <qt/test/optiontests.h>
 #include <qt/test/rpcnestedtests.h>
+#include <qt/test/tipnotifytests.h>
 #include <qt/test/uritests.h>
 #include <test/util/setup_common.h>
 
@@ -94,6 +95,9 @@ int main(int argc, char* argv[])
 
     URITests test1;
     num_test_failures += QTest::qExec(&test1);
+
+    TipNotifyTests tip_notify_tests;
+    num_test_failures += QTest::qExec(&tip_notify_tests);
 
     RPCNestedTests test3(app.node());
     num_test_failures += QTest::qExec(&test3);
