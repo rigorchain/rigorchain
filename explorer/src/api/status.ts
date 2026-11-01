@@ -15,6 +15,7 @@ import {
   resDestroyCostForHeight,
 } from "../resIssuanceSchedule";
 import { backfillMissingRfc018FeeBurn, getRfc018FeeBurnAtHeight } from "../rfc018FeeBurnStore";
+import { estimateNetworkHashrate } from "../networkHashrate";
 
 /** FVR-M compliance display — read-only, never computed at runtime. */
 export const DRAW_STATUS_DISPLAY = "ORU destroyed. RES minted.";
@@ -159,6 +160,8 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
   const blocks = blockWindow.rows;
   const times = blocks.map((b) => Number(b.time)).filter((t) => Number.isFinite(t));
   const avgBlockTime = averageBlockTimeSeconds(times);
+  // Same 100-block read already used for average interval. No extra history scan.
+  const networkHashrate = estimateNetworkHashrate(blocks, Math.floor(Date.now() / 1000));
 
   const tipBlock = blocks[0] ?? null;
 
@@ -357,6 +360,7 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
       difficulty: blockchainInfo.difficulty ?? null,
       difficulty_label: "ASERT / OpuHash (node-reported)",
       bits: tipBlock?.bits ?? null,
+      network_hashrate: networkHashrate,
       opus_hash: tipBlock?.opus_hash ?? null,
       pow_hash: tipBlock?.opus_hash ?? null,
       orphan_rate: null,

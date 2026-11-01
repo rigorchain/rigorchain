@@ -11,6 +11,7 @@ import { convergeOutputNote, destinationLabel } from "./txSummary";
 import { atomsToResDisplay, formatFixedAtoms } from "./amount";
 import { renderResIssuanceChartsHtml } from "./resIssuanceCharts";
 import { BLOCKS_PER_YEAR, buildRfc020Curve } from "./resIssuanceSchedule";
+import { HASHRATE_LABEL, HASHRATE_NOTE, HASHRATE_UNAVAILABLE } from "./networkHashrate";
 import { formatBlockHeaderTimeUtc, formatRelativeTime } from "./relativeTime";
 
 export function escapeHtml(s: unknown): string {
@@ -306,6 +307,16 @@ function statusDl(label: string, valueHtml: string): string {
   return `<dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd>`;
 }
 
+function statusHashrateCell(bh: Record<string, unknown>): string {
+  const raw = bh.network_hashrate;
+  const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const display = typeof row.display === "string" ? row.display : "";
+  const usable = row.available === true && display !== "" && !/^0(?:\.0+)?(?:\s|$)/.test(display);
+  const text = usable ? display : HASHRATE_UNAVAILABLE;
+  const note = typeof row.note === "string" && row.note ? row.note : HASHRATE_NOTE;
+  return `<span title="${escapeHtml(note)}">${escapeHtml(text)}</span>`;
+}
+
 function statusSection(title: string, rows: string[]): string {
   return `<section class="status-card"><h2>${escapeHtml(title)}</h2><dl>${rows.join("")}</dl></section>`;
 }
@@ -380,6 +391,7 @@ export function renderStatusRoot(data: Record<string, unknown>): string {
       statusDl("Node", statusFmt(id.product ?? id.node_subversion ?? id.node_version)),
       statusDl("Subversion", statusFmt(id.node_subversion)),
       statusDl("Best block", statusMonoHash(bh.best_block_hash)),
+      statusDl(HASHRATE_LABEL, statusHashrateCell(bh)),
     ]),
     statusSection("Block production", [
       statusDl("Height (node)", statusFmt(bh.current_height_node)),

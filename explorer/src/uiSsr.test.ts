@@ -229,6 +229,11 @@ describe("uiSsr", () => {
       },
     });
     assert.match(html, /Chain identity/);
+    assert.ok(html.indexOf("Best block") < html.indexOf("Network Hashrate (50 blocks)"));
+    assert.ok(html.indexOf("Network Hashrate (50 blocks)") < html.indexOf("Block production"));
+    assert.match(html, /Unavailable/);
+    assert.match(html, /not a direct measurement of miner hardware/);
+    assert.doesNotMatch(html, /0 H\/s/);
     assert.match(html, /RIGOR v0\.2/);
     assert.match(html, /Block production/);
     assert.match(html, /Indexer integrity/);
