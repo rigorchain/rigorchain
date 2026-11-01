@@ -67,6 +67,7 @@ export function loadConfigFromEnv(): Config {
     "/api/address/:addr": parseInt(process.env.RATE_LIMIT_ADDRESS_MAX ?? "60", 10),
     "/api/lineage/:txid": parseInt(process.env.RATE_LIMIT_LINEAGE_MAX ?? "40", 10),
     "/api/status": parseInt(process.env.RATE_LIMIT_STATUS_MAX ?? "30", 10),
+    "/api/oru/economics": parseInt(process.env.RATE_LIMIT_ORU_ECONOMICS_MAX ?? "30", 10),
     "/healthz": parseInt(process.env.RATE_LIMIT_HEALTH_MAX ?? "60", 10),
     "/compliance": parseInt(process.env.RATE_LIMIT_COMPLIANCE_MAX ?? "30", 10),
   };

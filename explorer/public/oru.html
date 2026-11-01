@@ -3,18 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ORU</title>
+    <title>ORU Convergence</title>
     <link rel="stylesheet" href="/compliance.css" />
     <link rel="stylesheet" href="/status-dashboard.css" />
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; background: #000; color: #fff; }
       .muted { color: #bbb; font-size: 12px; }
       a { color: #fff; }
+      h1 { margin-bottom: 0; }
+      .oru-sections { display: grid; gap: 16px; margin-top: 16px; }
+      .oru-sections h3 { margin: 14px 0 8px; font-size: 14px; color: #ddd; }
       table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-      th, td { border: 1px solid #333; padding: 8px; font-size: 13px; }
-      th { background: #111; text-align: left; }
+      th, td { border: 1px solid #333; padding: 8px; font-size: 13px; text-align: left; }
+      th { background: #111; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      @media (max-width: 800px) {
+        body { margin: 12px; }
+        .history-wrap { overflow-x: auto; }
+      }
     </style>
     <script src="/explorer-routes.js"></script>
+    <script src="/oru.js"></script>
   </head>
   <body>
     <nav class="site-nav" id="nav" aria-label="Explorer">
@@ -26,95 +35,13 @@
       <a href="/address">Address</a>
       <a href="/search">Search</a>
     </nav>
-    <h1>Network ORU</h1>
+    <h1>ORU Convergence</h1>
+    <p class="muted">Cumulative ORU Destruction and RES Generation — RIGOR Mainnet</p>
     <div id="root" class="status-dashboard">Loading…</div>
     <script>
       ExplorerRoutes.installCanonicalLink();
-      ExplorerRoutes.mountNav('nav');
-
-      function esc(s) {
-        return String(s ?? "—")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
-      function row(k, v) { return "<dt>" + esc(k) + "</dt><dd>" + v + "</dd>"; }
-      function card(title, rows) {
-        return '<section class="status-card"><h2>' + esc(title) + "</h2><dl>" + rows.join("") + "</dl></section>";
-      }
-      function val(v) { return v == null || v === "" ? "—" : esc(v); }
-
-      async function load() {
-        const [statusRes, blocksRes] = await Promise.all([
-          fetch("/api/status", { cache: "no-store" }),
-          fetch("/api/blocks?limit=15", { cache: "no-store" }),
-        ]);
-        if (!statusRes.ok) throw new Error("HTTP " + statusRes.status);
-        const j = await statusRes.json();
-        const eco = j.economic_snapshot ?? {};
-        const bh = j.block_health ?? {};
-        const id = j.chain_identity ?? {};
-        const blocks = ((await blocksRes.json()).blocks) || [];
-
-        const fees = eco.rfc018_fee_burn ?? {};
-        const chart = eco.supply_chart ?? {};
-        const acc = eco.accounting ?? {};
-        const scheduleNote =
-          esc(id.network) +
-          " · issued at node " +
-          esc(bh.current_height_node) +
-          " · circulating at indexer " +
-          esc(bh.current_height_indexer) +
-          " · ORU is issued as a fixed per-block subsidy after genesis. The complete specification will be published with mainnet launch.";
-        const supply = card("ORU supply", [
-          row("Total issued ORU", val((chart.total_issued_oru && chart.total_issued_oru.display) || eco.oru_supply_cumulative_display)),
-          row("Circulating spendable ORU", val(eco.oru_circulating_spendable_display)),
-          row("Mature transferable ORU", val(eco.oru_mature_transferable_display)),
-          row("Immature coinbase ORU", val(eco.oru_immature_coinbase_display)),
-          row("This block subsidy", val(eco.oru_subsidy_tip_display)),
-          row("Mature transferable outputs", val(eco.oru_mature_transferable_count)),
-          row("Supply split", acc.oru_supply_consistent === false ? "inconsistent" : "mature + immature = unlocked unspent"),
-        ]);
-        const conv = card("ORU Convergence", [
-          row("Convergence destroyed", val(eco.cumulative_convergence_display ?? eco.oru_burned_lifetime_display)),
-          row("Of which plain destroy", val(eco.oru_plain_destroy_display)),
-          row("Destroyed this block", val(eco.oru_burn_block_display)),
-          row("Fees destroyed this block", val(fees.block_burned_oru_display)),
-          row("Fees destroyed (cumulative)", val(fees.cumulative_burned_oru_display)),
-          row("Since last mint", val(eco.oru_since_last_mint_display)),
-          row("Convergence events", val(eco.convergence_event_count)),
-        ]);
-
-        const rows = blocks.map((b) =>
-          "<tr><td>" + esc(b.height) + "</td><td><a href=\"" +
-          ExplorerRoutes.blockPath(b.block_hash) + "\">" + esc(String(b.block_hash).slice(0, 12)) +
-          "…</a></td><td>" + esc(b.oru_minted_display ?? b.oru_minted) + "</td></tr>"
-        ).join("");
-
-        document.getElementById("root").innerHTML =
-          '<p class="muted">' + scheduleNote + "</p>" +
-          '<div class="status-grid status-grid--pair">' + supply + conv + "</div>" +
-          "<h2>Recent ORU issuance</h2>" +
-          "<table><thead><tr><th>height</th><th>hash</th><th>oru_minted</th></tr></thead><tbody>" +
-          (rows || '<tr><td colspan="3" class="muted">No blocks indexed.</td></tr>') +
-          "</tbody></table>";
-      }
-      let loading = false;
-      async function refresh() {
-        if (loading) return;
-        loading = true;
-        try {
-          await load();
-        } catch (e) {
-          if (!document.querySelector("#root .status-card")) {
-            document.getElementById("root").textContent = "Failed: " + String(e);
-          }
-        } finally {
-          loading = false;
-        }
-      }
-      refresh();
-      setInterval(refresh, 5000);
+      ExplorerRoutes.mountNav("nav");
+      OruPage.start();
     </script>
     <script src="/compliance.js"></script>
   </body>

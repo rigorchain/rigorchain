@@ -16,6 +16,7 @@ import {
 } from "./db";
 import type { Config } from "./config";
 import { buildStatusDashboard } from "./api/status";
+import { buildOruEconomicsView } from "./api/oruEconomics";
 import { blockListPageMeta, parseBlockListQuery } from "./blocksList";
 import {
   formatDerivedMaxSupply,
@@ -130,6 +131,15 @@ export function registerApiRoutes(app: Express, pool: Pool, config: Config): voi
       try {
         const dashboard = await buildStatusDashboard(config, pool);
         res.json(dashboard);
+      } catch (e) {
+        res.status(500).json({ error: String(e) });
+      }
+    });
+
+    app.get(`${prefix}/oru/economics`, async (_req, res) => {
+      try {
+        const view = await buildOruEconomicsView(config, pool);
+        res.json(view);
       } catch (e) {
         res.status(500).json({ error: String(e) });
       }

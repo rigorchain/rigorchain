@@ -56,8 +56,20 @@ export function opConvergeScriptSql(column = "script_pubkey"): string {
 }
 
 /**
+ * True when this transaction minted RES.
+ * Same predicate as a body mint: a res_mints row or a positive RES output.
+ */
+export function oruTxMintedResSql(txidExpr: string): string {
+  return (
+    `EXISTS (SELECT 1 FROM res_mints rm WHERE rm.mint_txid = ${txidExpr})` +
+    ` OR EXISTS (SELECT 1 FROM outputs r WHERE r.txid = ${txidExpr} AND r.asset_kind = 'RES' AND r.value_atoms > 0)`
+  );
+}
+
+/**
  * OP_CONVERGE ORU that did not mint RES.
- * Subset of Convergence destroyed — do not subtract from issued or circulating.
+ * Subset of Convergence destroyed — do not subtract from issued or circulating,
+ * and do not add it again on top of Convergence destroyed.
  */
 export function plainDestroyOruSql(outputAlias = "o"): string {
   const txid = `${outputAlias}.txid`;
@@ -65,8 +77,7 @@ export function plainDestroyOruSql(outputAlias = "o"): string {
     `${outputAlias}.asset_kind = 'ORU'` +
     ` AND ${opConvergeScriptSql(`${outputAlias}.script_pubkey`)}` +
     ` AND ${outputAlias}.value_atoms > 0` +
-    ` AND NOT EXISTS (SELECT 1 FROM res_mints rm WHERE rm.mint_txid = ${txid})` +
-    ` AND NOT EXISTS (SELECT 1 FROM outputs r WHERE r.txid = ${txid} AND r.asset_kind = 'RES' AND r.value_atoms > 0)`
+    ` AND NOT (${oruTxMintedResSql(txid)})`
   );
 }
 
