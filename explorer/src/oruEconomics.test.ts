@@ -236,6 +236,27 @@ describe("ORU–RES economic relationship", () => {
     assert.ok(labels.includes("Cumulative Convergence-attributable ORU Destroyed"));
   });
 
+  it("adds RFC-018 fees to total destruction and not to the historical conversion ratio", () => {
+    const view = buildOruEconomics(input({ feeAtoms: 457n }));
+    assert.equal(view.metrics.fees_destroyed.atoms, "457");
+    assert.equal(view.metrics.fees_destroyed.display, "0.00000457 ORU");
+    assert.equal(view.metrics.total_destroyed.atoms, (CONVERGENCE_1956 + 457n).toString());
+    assert.equal(view.metrics.historical_ratio.display, "1024.07929627 ORU per 1 RES");
+    assert.equal(view.metrics.current_conversion.display, "1024.11944928 ORU destroyed to mint 1 RES");
+  });
+
+  it("shows a stored zero fee total and hides a missing fee total", () => {
+    const zero = buildOruEconomics(input({ feeAtoms: 0n }));
+    const missing = buildOruEconomics(input({ feeAtoms: null }));
+    assert.equal(zero.metrics.fees_destroyed.display, "0.00000000 ORU");
+    assert.equal(zero.metrics.fees_destroyed.available, true);
+    assert.equal(zero.metrics.total_destroyed.atoms, CONVERGENCE_1956.toString());
+    assert.equal(missing.metrics.fees_destroyed.display, UNAVAILABLE);
+    assert.equal(missing.metrics.fees_destroyed.available, false);
+    assert.equal(missing.metrics.total_destroyed.display, UNAVAILABLE);
+    assert.notEqual(missing.metrics.fees_destroyed.display, "0.00000000 ORU");
+  });
+
   it("marks the historical ratio unavailable when attribution is missing", () => {
     const view = buildOruEconomics(
       input({
@@ -285,7 +306,9 @@ describe("indexer canonical reconstruction", () => {
     const sql = oruEconomicsAggregateSql();
     assert.match(sql, /JOIN blocks b ON b.block_hash = t.block_hash/);
     assert.match(sql, /rfc018_fee_burn_stats/);
-    assert.match(sql, /s.height = \(SELECT height FROM tip\)/);
+    assert.match(sql, /SUM\(s\.burned_oru\)/);
+    assert.match(sql, /THEN NULL/);
+    assert.doesNotMatch(sql, /cumulative_burned_oru/);
     assert.doesNotMatch(sql, /last 100| - 100|LIMIT 100/i);
     assert.match(sql, /COUNT\(DISTINCT o.txid\)/);
     assert.match(oruEconomicsRecentSql(), /JOIN blocks b ON b.block_hash = t.block_hash/);

@@ -355,15 +355,22 @@ describe("uiSsr", () => {
     const { curvesHtml, rootHtml } = renderResPageSsr({
       confirmHeight: 529,
       eco: {
-        res_destroy_cost_display: "1024.03228785 ORU destroyed to mint 1 RES",
-        confirm_height: 529,
+        network: "mainnet",
         res_derived_max_supply_display: "4194304.00000000 RES",
         network_res_minted_display: "40.30762289 RES",
-        res_mint_count: 9,
-        last_res_height: 527,
-        last_res_mint_txid: "aa".repeat(32),
       },
-      mints: [{ block_height: 527, mint_txid: "bb".repeat(32), mint_amount: "1" }],
+      transfers: [
+        {
+          height: 1185,
+          txid: "bb".repeat(32),
+          sender_kind: "address",
+          sender_address: "rg1sender",
+          recipient: "rg1recipient",
+          amount_display: "0.49803372 RES",
+          time: 1792990722,
+        },
+      ],
+      page: { page: 1, pages: 1, has_prev: false, has_next: false, total: 1 },
     });
     const html = injectSsrResPage(
       '<div id="curves" class="status-dashboard">Loading schedule…</div><div id="root" class="status-dashboard">Loading…</div>',
@@ -371,10 +378,12 @@ describe("uiSsr", () => {
       rootHtml,
     );
     assert.match(html, /data-ssr="1"/);
-    assert.match(html, /ORU destroyed to mint 1 RES/);
     assert.match(html, /status-grid--charts/);
-    assert.match(html, /RES mint history/);
+    assert.match(html, /RES Transfer History/);
     assert.match(html, /40\.30762289 RES/);
+    assert.match(html, /4194304\.00000000 RES/);
+    assert.match(html, /rg1recipient/);
+    assert.doesNotMatch(html, /RES mint history/);
     assert.doesNotMatch(html, /Loading schedule/);
     assert.doesNotMatch(html, />Loading…</);
   });
@@ -384,13 +393,14 @@ describe("uiSsr", () => {
     assert.match(template, /id="curves"/);
     const { curvesHtml, rootHtml } = renderResPageSsr({
       confirmHeight: 0,
-      eco: { network_res_minted_display: "0.00000000 RES", res_mint_count: 0 },
-      mints: [],
+      eco: { network_res_minted_display: "0.00000000 RES", res_derived_max_supply_display: "4194304.00000000 RES" },
+      transfers: [],
     });
     const html = injectSsrResPage(template, curvesHtml, rootHtml);
     assert.match(html, /status-grid--charts/);
-    assert.match(html, /ORU destroyed to mint 1 RES/);
-    assert.match(html, /RES mint ceiling/);
+    assert.match(html, /RES maximum supply/);
+    assert.match(html, /RES Transfer History/);
+    assert.match(html, /res-events\.html/);
     assert.equal((html.match(/<svg class="res-curve"/g) || []).length, 2);
     assert.doesNotMatch(html, /does not publish the issuance equation/);
   });

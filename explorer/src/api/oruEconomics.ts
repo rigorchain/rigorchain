@@ -4,8 +4,8 @@ import { atomsFromSql } from "../accounting";
 import { oruStringToAtoms } from "../amount";
 import { confirmHeightForTip } from "../resIssuanceSchedule";
 import { rpc } from "../rpcCli";
-import { buildOruEconomics, type OruEconomicsInput, type OruEconomicsView, type OruRecentEvent } from "../oruEconomics";
-import { oruEconomicsAggregateSql, oruEconomicsRecentSql } from "../oruEconomicsQuery";
+import { buildOruEconomics, type OruEconomicsInput, type OruEconomicsView } from "../oruEconomics";
+import { oruEconomicsAggregateSql } from "../oruEconomicsQuery";
 
 function parseRpcOru(value: unknown): bigint | null {
   if (value == null || value === "") return null;
@@ -28,10 +28,7 @@ function parseOptionalHeight(value: unknown): number | null {
 }
 
 export async function buildOruEconomicsView(config: Config, pool: Pool): Promise<OruEconomicsView> {
-  const [aggregate, recent] = await Promise.all([
-    pool.query(oruEconomicsAggregateSql()),
-    pool.query(oruEconomicsRecentSql()),
-  ]);
+  const aggregate = await pool.query(oruEconomicsAggregateSql());
   const row = aggregate.rows[0] ?? {};
 
   let nodeHeight: number | null = null;
@@ -68,13 +65,6 @@ export async function buildOruEconomicsView(config: Config, pool: Pool): Promise
   }
 
   const feeRaw = row.fee_atoms;
-  const recentEvents: OruRecentEvent[] = recent.rows.map((event) => ({
-    height: Number(event.height),
-    txid: String(event.txid),
-    blockHash: String(event.block_hash),
-    burnAtoms: atomsFromSql(event.burn_atoms),
-    resAtoms: atomsFromSql(event.res_atoms),
-  }));
 
   const input: OruEconomicsInput = {
     indexerHeight: parseOptionalHeight(row.indexer_height),
@@ -93,7 +83,7 @@ export async function buildOruEconomicsView(config: Config, pool: Pool): Promise
     feeAtoms: feeRaw == null || feeRaw === "" ? null : atomsFromSql(feeRaw),
     eventCount: Number(row.event_count ?? 0),
     lastMintHeight: parseOptionalHeight(row.last_mint_height),
-    recent: recentEvents,
+    recent: [],
   };
   return buildOruEconomics(input);
 }

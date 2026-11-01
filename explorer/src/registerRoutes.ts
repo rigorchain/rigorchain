@@ -17,7 +17,9 @@ import {
 import type { Config } from "./config";
 import { buildStatusDashboard } from "./api/status";
 import { buildOruEconomicsView } from "./api/oruEconomics";
+import { getRfc018FeeBurnAtHeight } from "./rfc018FeeBurnStore";
 import { blockListPageMeta, parseBlockListQuery } from "./blocksList";
+import { listResTransferPage } from "./resTransferQuery";
 import {
   formatDerivedMaxSupply,
   formatRateOruPerRes,
@@ -120,6 +122,13 @@ export function registerApiRoutes(app: Express, pool: Pool, config: Config): voi
       res.json(resIssuanceSchedulePayload());
     });
 
+    app.get(`${prefix}/res/transfers`, async (req, res) => {
+      if (!config) return res.status(503).json({ error: "explorer config unavailable" });
+      const query = parseBlockListQuery({ limit: req.query.limit, page: req.query.page });
+      const page = await listResTransferPage(pool, config, query);
+      res.json(page);
+    });
+
     app.get(`${prefix}/res/events`, async (req, res) => {
       const limit = Math.min(Number(req.query.limit ?? 200), 500);
       const eligibleOnly = req.query.eligible_only === "1" || req.query.eligible_only === "true";
@@ -152,21 +161,19 @@ export function registerApiRoutes(app: Express, pool: Pool, config: Config): voi
           SELECT
             (SELECT cumulative_convergence FROM blocks WHERE height = $1 LIMIT 1) AS cumulative_convergence,
             (SELECT COALESCE(SUM(mint_amount),0) FROM res_mints rm JOIN blocks b ON b.block_hash = rm.block_hash WHERE b.height <= $1) AS res_mint_total_atoms,
-            (SELECT burned_oru::text FROM rfc018_fee_burn_stats WHERE height = $1 LIMIT 1) AS rfc018_block_burned_oru,
-            (SELECT cumulative_burned_oru::text FROM rfc018_fee_burn_stats WHERE height = $1 LIMIT 1) AS rfc018_cumulative_burned_oru
+            (SELECT burned_oru::text FROM rfc018_fee_burn_stats WHERE height = $1 LIMIT 1) AS rfc018_block_burned_oru
         `,
         [chain.last_height],
       );
       const row = stats.rows[0] ?? {};
-      const blockBurn = row.rfc018_block_burned_oru != null ? String(row.rfc018_block_burned_oru) : "0";
-      const cumBurn = row.rfc018_cumulative_burned_oru != null ? String(row.rfc018_cumulative_burned_oru) : "0";
+      const feeBurn = await getRfc018FeeBurnAtHeight(pool, chain.last_height);
       res.json({
         chain_state: chain,
         stats: row,
         rfc018_fee_burn: {
-          block_burned_oru: blockBurn,
-          cumulative_burned_oru: cumBurn,
-          indexed: row.rfc018_block_burned_oru != null,
+          block_burned_oru: feeBurn ? feeBurn.burned_oru.toString() : null,
+          cumulative_burned_oru: feeBurn?.cumulative_burned_oru == null ? null : feeBurn.cumulative_burned_oru.toString(),
+          indexed: feeBurn != null && feeBurn.cumulative_burned_oru != null,
         },
       });
     });
@@ -303,30 +310,29 @@ export function registerUiRoutes(app: Express, pool: Pool, publicDir: string, co
   app.get(["/res", "/res.html"], async (req, res, next) => {
     if (!wantsHtmlPage(req)) return next();
     try {
-      const [mints, totals] = await Promise.all([
-        listResMints(pool, 15),
-        pool.query<{ n: number; atoms: string }>(
-          `SELECT COUNT(*)::int AS n, COALESCE(SUM(mint_amount), 0)::text AS atoms FROM res_mints`,
-        ),
-      ]);
+      if (!config) {
+        sendPublic(res, publicDir, "res.html");
+        return;
+      }
+      const query = parseBlockListQuery({ limit: req.query.limit, page: req.query.page });
+      const listed = await listResTransferPage(pool, config, query);
       let confirmHeight: number | null = null;
-      if (config) {
-        const chain = await getOrCreateChainState(pool, config);
-        if (Number.isFinite(Number(chain.last_height))) {
-          confirmHeight = Number(chain.last_height) + 1;
-        }
+      const chain = await getOrCreateChainState(pool, config);
+      if (Number.isFinite(Number(chain.last_height))) {
+        confirmHeight = Number(chain.last_height) + 1;
       }
       const eco: Record<string, unknown> = {
+        network: listed.overview.network,
         confirm_height: confirmHeight,
-        res_destroy_cost_display:
-          confirmHeight != null ? formatRateOruPerRes(resDestroyCostForHeight(confirmHeight)) : null,
-        res_derived_max_supply_display: formatDerivedMaxSupply(),
-        network_res_minted_display: atomsToResDisplay(totals.rows[0]?.atoms ?? "0"),
-        res_mint_count: totals.rows[0]?.n ?? 0,
-        last_res_height: mints[0]?.block_height ?? null,
-        last_res_mint_txid: mints[0]?.mint_txid ?? null,
+        res_derived_max_supply_display: listed.overview.max_supply_display,
+        network_res_minted_display: listed.overview.minted_display,
       };
-      const { curvesHtml, rootHtml } = renderResPageSsr({ confirmHeight, eco, mints });
+      const { curvesHtml, rootHtml } = renderResPageSsr({
+        confirmHeight,
+        eco,
+        transfers: listed.transfers,
+        page: listed,
+      });
       sendSsrHtml(res, injectSsrResPage(readPublicTemplate(publicDir, "res.html"), curvesHtml, rootHtml));
     } catch (e) {
       console.error("SSR /res failed:", e);

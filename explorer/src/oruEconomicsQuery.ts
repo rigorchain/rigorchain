@@ -69,9 +69,23 @@ export function oruEconomicsAggregateSql(): string {
         )
       ) AS attributable_res_atoms,
       (
-        SELECT cumulative_burned_oru::text
-        FROM rfc018_fee_burn_stats s
-        WHERE s.height = (SELECT height FROM tip)
+        SELECT CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM blocks b
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM rfc018_fee_burn_stats s
+              WHERE s.height = b.height
+                AND s.block_hash = b.block_hash
+            )
+          ) THEN NULL
+          ELSE (
+            SELECT COALESCE(SUM(s.burned_oru), 0)::text
+            FROM rfc018_fee_burn_stats s
+            JOIN blocks b ON b.height = s.height AND b.block_hash = s.block_hash
+          )
+        END
       ) AS fee_atoms,
       (
         SELECT MAX(rm.block_height)::text

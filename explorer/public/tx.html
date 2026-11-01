@@ -100,6 +100,15 @@
         const convergeProofPanel = j.converge_proof_panel;
         const lineageGraph = j.lineage_graph;
 
+        const vinRows = (j.vin || []).map((input) => {
+          const kind = input.prev_asset_kind || "—";
+          const atoms = input.prev_value_atoms;
+          const valueStr = atoms == null ? "—" : (kind === "RES" ? atomsToRes(atoms) : (kind === "ORU" ? atomsToOru(atoms) : String(atoms)));
+          const addr = input.prev_address ? `<a href="${ExplorerRoutes.addressPath(input.prev_address)}">${input.prev_address}</a>` : "—";
+          const tagClass = kind === "RES" ? "tag-res" : (kind === "ORU" ? "tag-oru" : "");
+          return `<tr><td>${input.vin_index ?? ""}</td><td><span class="tag ${tagClass}">${kind}</span></td><td>${valueStr}</td><td>${addr}</td></tr>`;
+        }).join("");
+
         const voutRows = (j.vout || []).map((o) => {
           const tagClass = o.asset_kind === 'RES' ? 'tag-res' : (o.asset_kind === 'ORU' ? 'tag-oru' : '');
           const tag = o.asset_kind === 'RES' ? `RES` : (o.asset_kind === 'ORU' ? 'ORU' : o.asset_kind);
@@ -146,7 +155,7 @@
               <tr><th>Sender</th><td class="mono">${sum.sender ?? 'N/A'}</td></tr>
               <tr><th>${sum.amount_role === 'convergence_lock' ? 'OP_CONVERGE (Unspendable destroy output)' : 'Receiver'}</th><td class="mono">${sum.receiver ? `<a href="${ExplorerRoutes.addressPath(sum.receiver)}">${sum.receiver}</a>` : 'N/A'}</td></tr>
               <tr><th>${sum.is_coinbase ? 'Subsidy' : 'Amount'}</th><td>${sum.is_coinbase ? (sum.subsidy_display ?? sum.amount_display) : (sum.amount_display ?? 'N/A')}${!sum.is_coinbase && sum.amount_total_display && sum.amount_total_display !== sum.amount_display ? ` <span class="muted">(outputs total ${sum.amount_total_display})</span>` : ''}</td></tr>
-              <tr><th>Fee</th><td>${fee.fee_display ?? 'N/A'}</td></tr>
+              <tr><th>Fee</th><td>${fee.fee_display ?? 'N/A'}${fee.fee_kind === 'na' ? ' <span class="muted">ORU fee unavailable</span>' : ''}</td></tr>
             </tbody>
           </table>
 
@@ -154,6 +163,10 @@
           <pre class="mono">${JSON.stringify(tx, null, 2)}</pre>
 
           <h2>Inputs</h2>
+          <table>
+            <thead><tr><th>vin</th><th>asset</th><th>amount</th><th>address</th></tr></thead>
+            <tbody>${vinRows}</tbody>
+          </table>
           <pre class="mono">${JSON.stringify(j.vin || [], null, 2)}</pre>
 
           <h2>Outputs</h2>

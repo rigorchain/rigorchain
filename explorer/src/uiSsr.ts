@@ -216,6 +216,23 @@ export function renderTxRoot(data: Record<string, unknown>, txid: string): strin
     typeof sum.tx_kind_label === "string" && sum.tx_kind_label
       ? `<tr><th>Type</th><td>${escapeHtml(sum.tx_kind_label)}</td></tr>`
       : "";
+  const vin = (data.vin as Array<Record<string, unknown>>) || [];
+  const vinRows = vin
+    .map((input) => {
+      const kind = String(input.prev_asset_kind ?? "");
+      const atoms = input.prev_value_atoms == null ? "" : String(input.prev_value_atoms);
+      let valueStr = atoms || "—";
+      try {
+        if (kind === "ORU" || kind === "RES") valueStr = formatFixedAtoms(BigInt(atoms), 8);
+      } catch {
+        /* keep raw */
+      }
+      const addr = input.prev_address
+        ? `<a href="/address/${encodeURIComponent(String(input.prev_address))}">${escapeHtml(input.prev_address)}</a>`
+        : "—";
+      return `<tr><td>${escapeHtml(input.vin_index ?? "")}</td><td>${escapeHtml(kind || "—")}</td><td>${escapeHtml(valueStr)}</td><td>${addr}</td></tr>`;
+    })
+    .join("");
   const voutRows = vout
     .map((o) => {
       const kind = String(o.asset_kind ?? "");
@@ -255,8 +272,17 @@ export function renderTxRoot(data: Record<string, unknown>, txid: string): strin
       <tr><th>Sender</th><td class="mono">${escapeHtml(sum.sender ?? "N/A")}</td></tr>
       <tr><th>${escapeHtml(destLabel)}</th><td class="mono">${sum.receiver ? `<a href="/address/${encodeURIComponent(String(sum.receiver))}">${escapeHtml(sum.receiver)}</a>` : "N/A"}</td></tr>
       <tr><th>${escapeHtml(amountLabel)}</th><td>${escapeHtml(amount ?? "N/A")}${extra}</td></tr>
-      <tr><th>Fee</th><td>${escapeHtml(fee.fee_display ?? "N/A")}</td></tr>
+      <tr><th>Fee</th><td>${
+        fee.fee_kind === "na"
+          ? `${escapeHtml(fee.fee_display ?? "N/A")} <span class="muted">ORU fee unavailable</span>`
+          : escapeHtml(fee.fee_display ?? "N/A")
+      }</td></tr>
     </tbody></table>
+    <h2>Inputs</h2>
+    <table>
+      <thead><tr><th>vin</th><th>asset</th><th>amount</th><th>address</th></tr></thead>
+      <tbody>${vinRows}</tbody>
+    </table>
     <h2>Outputs</h2>
     <table>
       <thead><tr><th>vout</th><th>asset</th><th>amount</th><th>address</th></tr></thead>
@@ -436,44 +462,57 @@ function resTxLink(txid: unknown): string {
   return `<a class="mono" href="/tx/${encodeURIComponent(s)}" title="${escapeHtml(s)}">${escapeHtml(label)}</a>`;
 }
 
+function transferParty(kind: unknown, address: unknown): string {
+  if (kind === "multiple") return "Multiple inputs";
+  if (kind === "address" && address) {
+    const value = String(address);
+    return `<a class="mono" href="/address/${encodeURIComponent(value)}">${escapeHtml(value)}</a>`;
+  }
+  return "Unavailable";
+}
+
 export function renderResDetailsHtml(
   eco: Record<string, unknown>,
-  mints: Array<Record<string, unknown>>,
+  transfers: Array<Record<string, unknown>>,
+  page?: { page: number; pages: number; has_prev: boolean; has_next: boolean; total: number },
 ): string {
-  const schedule = `<section class="status-card"><h2>RES schedule</h2><dl>
-    <dt>ORU destroyed to mint 1 RES</dt><dd>${escapeHtml(eco.res_destroy_cost_display ?? "—")}</dd>
-    <dt>Confirming height</dt><dd>${escapeHtml(eco.confirm_height ?? eco.tip_height ?? eco.height ?? "—")}</dd>
-    <dt>RES mint ceiling</dt><dd>${escapeHtml(eco.res_derived_max_supply_display ?? "—")}</dd>
-    <dt>Network RES minted</dt><dd>${escapeHtml(eco.network_res_minted_display ?? "—")}</dd>
-  </dl></section>`;
-  const activity = `<section class="status-card"><h2>RES activity</h2><dl>
-    <dt>RES minted (last 100)</dt><dd>${escapeHtml(eco.res_mint_rate_last_100_blocks_display ?? "—")}</dd>
-    <dt>Mint count</dt><dd>${escapeHtml(eco.res_mint_count ?? "—")}</dd>
-    <dt>Last mint height</dt><dd>${escapeHtml(eco.last_res_height ?? "—")}</dd>
-    <dt>Last mint tx</dt><dd>${resTxLink(eco.last_res_mint_txid)}</dd>
-  </dl></section>`;
-  const rows = mints
-    .map((m) => {
-      const amount =
-        m.mint_amount != null
-          ? atomsToResDisplay(String(m.mint_amount))
-          : "—";
-      return `<tr><td>${escapeHtml(m.block_height)}</td><td><a class="mono" href="/tx/${encodeURIComponent(String(m.mint_txid ?? ""))}">${escapeHtml(m.mint_txid)}</a></td><td>${escapeHtml(amount)}</td></tr>`;
+  const overview = `<section class="status-card"><h2>RES overview</h2><dl>
+    <dt>Asset</dt><dd>RES</dd>
+    <dt>Network</dt><dd>${escapeHtml(eco.network ?? "—")}</dd>
+    <dt>RES maximum supply</dt><dd>${escapeHtml(eco.res_derived_max_supply_display ?? "—")}</dd>
+    <dt>RES minted</dt><dd>${escapeHtml(eco.network_res_minted_display ?? "—")}</dd>
+  </dl>
+  <p class="muted">Mint and destruction events are on the <a href="/res-events.html">RES events</a> page.</p>
+  </section>`;
+  const rows = transfers
+    .map((row) => {
+      const when = row.time == null ? "—" : new Date(Number(row.time) * 1000).toISOString().replace(".000Z", "Z");
+      const recipient = row.recipient
+        ? `<a class="mono" href="/address/${encodeURIComponent(String(row.recipient))}">${escapeHtml(row.recipient)}</a>`
+        : "Unavailable";
+      return `<tr><td>${escapeHtml(row.height)}</td><td>${resTxLink(row.txid)}</td><td>${transferParty(row.sender_kind, row.sender_address)}</td><td>${recipient}</td><td>${escapeHtml(row.amount_display ?? "—")}</td><td>${escapeHtml(when)}</td></tr>`;
     })
     .join("");
+  const pager = page
+    ? `<p class="muted">Page ${page.page} / ${page.pages} · ${page.total} transfers${
+        page.has_prev ? ` · <a href="/res.html?page=${page.page - 1}">Newer</a>` : ""
+      }${page.has_next ? ` · <a href="/res.html?page=${page.page + 1}">Older</a>` : ""}</p>`
+    : "";
   return (
-    `<div class="status-grid status-grid--pair">${schedule}${activity}</div>` +
-    `<div class="res-history"><h2>RES mint history</h2>` +
-    `<table><thead><tr><th>height</th><th>mint txid</th><th>amount</th></tr></thead><tbody>` +
-    (rows || '<tr><td colspan="3" class="muted">No RES mints on this chain yet.</td></tr>') +
-    `</tbody></table></div>`
+    overview +
+    `<div class="res-history"><h2>RES Transfer History</h2>` +
+    pager +
+    `<div class="history-wrap"><table><thead><tr><th>Height</th><th>Transaction</th><th>From</th><th>To</th><th>Amount</th><th>Time</th></tr></thead><tbody>` +
+    (rows || '<tr><td colspan="6" class="muted">No confirmed RES transfers on this chain yet.</td></tr>') +
+    `</tbody></table></div>${pager}</div>`
   );
 }
 
 export function renderResPageSsr(args: {
   confirmHeight: number | null;
   eco: Record<string, unknown>;
-  mints: Array<Record<string, unknown>>;
+  transfers: Array<Record<string, unknown>>;
+  page?: { page: number; pages: number; has_prev: boolean; has_next: boolean; total: number };
 }): { curvesHtml: string; rootHtml: string } {
   const currentYear =
     args.confirmHeight != null && Number.isFinite(args.confirmHeight)
@@ -481,6 +520,6 @@ export function renderResPageSsr(args: {
       : null;
   return {
     curvesHtml: renderResIssuanceChartsHtml(buildRfc020Curve(), currentYear),
-    rootHtml: renderResDetailsHtml(args.eco, args.mints),
+    rootHtml: renderResDetailsHtml(args.eco, args.transfers, args.page),
   };
 }

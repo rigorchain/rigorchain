@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   ORU_COIN,
   RES_COIN,
+  cumulativeBurnFromBlockBurns,
   destroyedFeeOruForBlock,
   nextCumulativeBurn,
   oruResTransferFeeBurnShare,
+  parentPointerCumulative,
   rfc018DestroyedFeeOru,
   rollbackCumulativeBurn,
   rfc018FeeBurnView,
@@ -117,6 +119,94 @@ describe("RFC-018 explorer fee-burn statistics", () => {
     const afterNewTip = nextCumulativeBurn(restored, newBranchBurn);
     assert.equal(afterNewTip, 600n);
     assert.notEqual(afterNewTip, parentCum + oldTipBurn + newBranchBurn);
+  });
+
+  it("burns floor(fee/2) for an odd RES-transfer fee and nothing for a one-atom fee", () => {
+    const odd = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: false,
+      inputs: [res(97653880n), oru(58591052n)],
+      outputs: [res(10000000n), res(87653880n), oru(58590643n)],
+    });
+    const oneAtom = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: false,
+      inputs: [res(RES_COIN), oru(100n)],
+      outputs: [res(RES_COIN), oru(99n)],
+    });
+    assert.equal(58591052n - 58590643n, 409n);
+    assert.equal(odd, 204n);
+    assert.equal(oneAtom, 0n);
+  });
+
+  it("does not classify a pure ORU spend or a RES mint as RFC-018 destruction", () => {
+    const oruSpend = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: false,
+      inputs: [oru(128n * ORU_COIN)],
+      outputs: [oru(128n * ORU_COIN - 214n)],
+    });
+    const mint = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: true,
+      inputs: [oru(128n * ORU_COIN), oru(128n * ORU_COIN), oru(128n * ORU_COIN)],
+      outputs: [oru(380n * ORU_COIN), oru(399999463n), res(37108631n)],
+    });
+    const mintWithoutFlag = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: false,
+      inputs: [oru(128n * ORU_COIN), oru(128n * ORU_COIN), oru(128n * ORU_COIN)],
+      outputs: [oru(380n * ORU_COIN), oru(399999463n), res(37108631n)],
+    });
+    assert.equal(384n * ORU_COIN - (380n * ORU_COIN + 399999463n), 537n);
+    assert.equal(oruSpend, 0n);
+    assert.equal(mint, 0n);
+    assert.equal(mintWithoutFlag, 0n);
+  });
+
+  it("keeps an OP_CONVERGE output out of the RES-transfer fee burn", () => {
+    const transfer = rfc018DestroyedFeeOru({
+      isCoinbase: false,
+      isResMint: false,
+      inputs: [res(49803372n), oru(89998852n)],
+      outputs: [res(49803372n), oru(89998346n)],
+    });
+    assert.equal(89998852n - 89998346n, 506n);
+    assert.equal(transfer, 253n);
+    assert.notEqual(transfer, 253n + 380n * ORU_COIN);
+  });
+
+  it("sums distinct qualifying transfers and ignores a replay of the same height", () => {
+    const rows = [
+      { height: 845, burned: 204n },
+      { height: 1185, burned: 253n },
+      { height: 1185, burned: 253n },
+      { height: 1386, burned: 0n },
+    ];
+    assert.equal(cumulativeBurnFromBlockBurns(rows), 457n);
+    assert.equal(
+      cumulativeBurnFromBlockBurns([
+        { height: 845, burned: 204n },
+        { height: 1185, burned: null },
+      ]),
+      null,
+    );
+  });
+
+  it("does not let a missing parent height restart the canonical sum at zero", () => {
+    const rows: Array<{ height: number; burned: bigint }> = [];
+    for (let height = 1; height <= 1386; height += 1) {
+      const burned = height === 845 ? 204n : height === 1185 ? 253n : 0n;
+      rows.push({ height, burned });
+    }
+    rows.push({ height: 1388, burned: 0n });
+    const pointer = parentPointerCumulative(rows);
+    assert.equal(pointer.get(1386), 457n);
+    assert.equal(pointer.get(1388), 0n);
+    assert.equal(cumulativeBurnFromBlockBurns(rows), 457n);
+    const afterReorg = rows.filter((row) => row.height < 1388);
+    assert.equal(cumulativeBurnFromBlockBurns(afterReorg), 457n);
+    assert.notEqual(cumulativeBurnFromBlockBurns(afterReorg), pointer.get(1388));
   });
 
   it("keeps fee-burn view fields separate from circulating and Convergence", () => {

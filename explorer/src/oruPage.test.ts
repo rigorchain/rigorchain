@@ -95,17 +95,18 @@ describe("ORU page presentation", () => {
     assert.doesNotMatch(rendered, /Destroyed this block|Fees destroyed this block|Since last mint/);
   });
 
-  it("links recent confirmed events and stays readable on a narrow viewport", () => {
-    assert.match(rendered, new RegExp(`/tx/${"ab".repeat(32)}`));
-    assert.match(rendered, new RegExp(`/block/${HASH}`));
-    assert.match(rendered, /Recent confirmed Convergence transactions/);
+  it("does not repeat the convergence event list and stays readable on a narrow viewport", () => {
+    assert.doesNotMatch(rendered, /Recent confirmed Convergence transactions/);
+    assert.doesNotMatch(readPublic("oru.js"), /Recent confirmed Convergence transactions/);
+    assert.doesNotMatch(rendered, new RegExp(`/tx/${"ab".repeat(32)}`));
     assert.match(html, /name="viewport"/);
     assert.match(html, /@media \(max-width: 800px\)/);
     assert.match(html, /href="\/oru\.html"/);
-    assert.match(html, /href="\/"/);
+    assert.match(html, /href="\/res-events\.html"/);
     assert.equal(page.REFRESH_MS, 60000);
     assert.match(html, /\/api\/oru\/economics|OruPage\.start/);
     assert.doesNotMatch(readPublic("oru.js"), /\/api\/status/);
+    assert.doesNotMatch(readPublic("oru.js"), /\/api\/res\/events/);
   });
 });
 

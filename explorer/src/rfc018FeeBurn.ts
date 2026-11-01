@@ -75,6 +75,44 @@ export function nextCumulativeBurn(parentCumulative: bigint, blockBurn: bigint):
   return parentCumulative + blockBurn;
 }
 
+/**
+ * Cumulative RFC-018 destruction is the sum of per-block burns on the
+ * canonical blocks that are actually indexed.
+ *
+ * A missing parent height must not restart the sum at zero. Replaying the
+ * same height does not add the burn twice. A null burn means that block's
+ * accounting row is absent, so the total is unavailable rather than zero.
+ */
+export function cumulativeBurnFromBlockBurns(
+  rows: Array<{ height: number; burned: bigint | null }>,
+): bigint | null {
+  const seen = new Set<number>();
+  let sum = 0n;
+  for (const row of rows) {
+    if (seen.has(row.height)) continue;
+    if (row.burned == null) return null;
+    seen.add(row.height);
+    sum += row.burned;
+  }
+  return sum;
+}
+
+/**
+ * The stored prefix that copies `cumulative(height - 1)`.
+ * If that parent row does not exist, this restarts at the current block.
+ * Readers must not use it when a height is absent from the index.
+ */
+export function parentPointerCumulative(
+  rows: Array<{ height: number; burned: bigint }>,
+): Map<number, bigint> {
+  const out = new Map<number, bigint>();
+  for (const row of [...rows].sort((a, b) => a.height - b.height)) {
+    const parent = out.get(row.height - 1) ?? 0n;
+    out.set(row.height, parent + row.burned);
+  }
+  return out;
+}
+
 /** Disconnect of the tip: subtract that block's burned_oru from the chain cumulative. */
 export function rollbackCumulativeBurn(tipCumulative: bigint, disconnectedBlockBurn: bigint): bigint {
   return tipCumulative - disconnectedBlockBurn;

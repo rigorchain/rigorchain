@@ -1,6 +1,9 @@
 /**
  * Explorer fee display only. Does not change the consensus fee model.
- * ORU: fee_i = ORU_in − ORU_out. Coinbase: 0. RES: never invent a fee.
+ * The displayed fee is the ORU leg: ORU inputs minus ORU outputs.
+ * RES amounts are not part of that leg. RFC-018 destruction is a separate
+ * floor share of this fee and is not subtracted here.
+ * Coinbase displays 0. A missing prevout stays N/A rather than a guessed fee.
  */
 
 export type FeeKind = "coinbase" | "oru" | "na";
@@ -24,17 +27,15 @@ export function formatOruAtoms(atoms: bigint): string {
 
 export function computeTxFee(args: {
   isCoinbase: boolean;
-  /** Sum of spent ORU input values. null if any ORU prevout is missing. */
+  /** Sum of spent ORU input values. null if any prevout is missing. */
   oruInputAtoms: bigint | null;
   oruOutputAtoms: bigint;
-  /** True if any input or output is RES — do not invent RES fee logic. */
+  /** Retained for callers. RES movement does not replace or suppress the ORU leg. */
   involvesRes: boolean;
 }): FeeView {
+  void args.involvesRes;
   if (args.isCoinbase) {
     return { fee_atoms: "0", fee_display: "0", fee_kind: "coinbase" };
-  }
-  if (args.involvesRes) {
-    return { fee_atoms: null, fee_display: "N/A", fee_kind: "na" };
   }
   if (args.oruInputAtoms === null) {
     return { fee_atoms: null, fee_display: "N/A", fee_kind: "na" };

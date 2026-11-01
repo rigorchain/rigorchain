@@ -291,15 +291,23 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
   } catch {
     feeBurnAtTip = null;
   }
-  const rfc018FeeBurn = {
-    ...rfc018FeeBurnView(
-      feeBurnAtTip?.burned_oru ?? 0n,
-      feeBurnAtTip?.cumulative_burned_oru ?? 0n,
-      atomsToOruDisplay,
-    ),
-    indexed: feeBurnAtTip != null,
-    height: feeBurnAtTip != null && indexerHeight >= 0 ? String(indexerHeight) : null,
-  };
+  const feeCumulative = feeBurnAtTip?.cumulative_burned_oru ?? null;
+  const rfc018FeeBurn =
+    feeBurnAtTip != null && feeCumulative != null
+      ? {
+          ...rfc018FeeBurnView(feeBurnAtTip.burned_oru, feeCumulative, atomsToOruDisplay),
+          indexed: true,
+          height: indexerHeight >= 0 ? String(indexerHeight) : null,
+        }
+      : {
+          block_burned_oru: feeBurnAtTip ? feeBurnAtTip.burned_oru.toString() : null,
+          cumulative_burned_oru: null,
+          block_burned_oru_display: feeBurnAtTip ? atomsToOruDisplay(feeBurnAtTip.burned_oru) : null,
+          cumulative_burned_oru_display: null,
+          equivalence_claimed: false as const,
+          indexed: false,
+          height: null,
+        };
   const totalIssuedDisplay =
     formatOruAmount(runtimeSupply.oru_subsidy_cumulative_derived) ??
     formatOruAmount(runtimeSupply.oru_supply_cumulative);

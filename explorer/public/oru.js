@@ -12,23 +12,6 @@
       .replace(/"/g, "&quot;");
   }
 
-  function txPath(txid) {
-    if (window.ExplorerRoutes && ExplorerRoutes.txPath) return ExplorerRoutes.txPath(txid);
-    return "/tx/" + encodeURIComponent(txid);
-  }
-
-  function blockPath(hash) {
-    if (window.ExplorerRoutes && ExplorerRoutes.blockPath) return ExplorerRoutes.blockPath(hash);
-    return "/block/" + encodeURIComponent(hash);
-  }
-
-  function shortHash(hash) {
-    const s = String(hash || "");
-    if (!s) return "—";
-    if (s.length <= 20) return s;
-    return s.slice(0, 12) + "…" + s.slice(-6);
-  }
-
   function rowsHtml(rows) {
     return (rows || [])
       .map(function (row) {
@@ -55,33 +38,6 @@
     const notes = [];
     if (snap.lag_note) notes.push(`<p class="muted">${escapeHtml(snap.lag_note)}</p>`);
     if (snap.accounting_note) notes.push(`<p class="muted">${escapeHtml(snap.accounting_note)}</p>`);
-    const recent = data.recent || [];
-    const body = recent
-      .map(function (row) {
-        return (
-          "<tr><td>" +
-          escapeHtml(row.height) +
-          '</td><td><a class="mono" href="' +
-          blockPath(row.block_hash) +
-          '">' +
-          escapeHtml(shortHash(row.block_hash)) +
-          '</a></td><td><a class="mono" href="' +
-          txPath(row.txid) +
-          '">' +
-          escapeHtml(shortHash(row.txid)) +
-          "</a></td><td>" +
-          escapeHtml(row.oru_destroyed_display) +
-          "</td><td>" +
-          escapeHtml(row.res_minted_display) +
-          "</td></tr>"
-        );
-      })
-      .join("");
-    const history =
-      '<h2>Recent confirmed Convergence transactions</h2>' +
-      '<div class="history-wrap"><table><thead><tr><th>Height</th><th>Block</th><th>Transaction</th><th>ORU destroyed</th><th>RES minted</th></tr></thead><tbody>' +
-      (body || '<tr><td colspan="5" class="muted">No confirmed Convergence transactions indexed.</td></tr>') +
-      "</tbody></table></div>";
     return (
       `<p class="muted">${escapeHtml(snap.freshness || "")}</p>` +
       notes.join("") +
@@ -90,8 +46,7 @@
       sectionHtml(sections.destruction) +
       sectionHtml(sections.res) +
       sectionHtml(sections.relationship) +
-      "</div>" +
-      history
+      "</div>"
     );
   }
 
