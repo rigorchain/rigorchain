@@ -101,6 +101,8 @@ describe("ORU page presentation", () => {
     assert.doesNotMatch(rendered, new RegExp(`/tx/${"ab".repeat(32)}`));
     assert.match(html, /name="viewport"/);
     assert.match(html, /@media \(max-width: 800px\)/);
+    assert.match(html, /\.oru-sections \.status-card dl \{\s*grid-template-columns: 1fr;/);
+    assert.match(html, /\.oru-sections \.status-card dd \{[^}]*word-break: normal;/);
     assert.match(html, /href="\/oru\.html"/);
     assert.match(html, /href="\/res-events\.html"/);
     assert.equal(page.REFRESH_MS, 60000);

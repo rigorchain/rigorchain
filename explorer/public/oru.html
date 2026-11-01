@@ -20,6 +20,23 @@
       @media (max-width: 800px) {
         body { margin: 12px; }
         .history-wrap { overflow-x: auto; }
+        .oru-sections .status-card dl {
+          grid-template-columns: 1fr;
+          gap: 2px 0;
+        }
+        .oru-sections .status-card dt {
+          white-space: normal;
+          margin-top: 10px;
+        }
+        .oru-sections .status-card h2 + dl dt:first-of-type,
+        .oru-sections .status-card h3 + dl dt:first-of-type {
+          margin-top: 0;
+        }
+        .oru-sections .status-card dd {
+          min-width: 0;
+          overflow-wrap: break-word;
+          word-break: normal;
+        }
       }
     </style>
     <script src="/explorer-routes.js"></script>
