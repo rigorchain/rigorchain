@@ -105,7 +105,10 @@ jobs:
             if brew list --versions "${name}" >/dev/null 2>&1; then
               brew uninstall --ignore-dependencies "${name}"
             fi
-            brew install --ignore-dependencies "${file}"
+            (
+              cd "${RUNNER_TEMP}/bottles"
+              brew install --ignore-dependencies "./${name}--${pkgver}.${tag}.bottle.tar.gz"
+            )
             brew list --versions "${name}" | awk -v n="${name}" -v v="${pkgver}" '$1==n && $2==v { ok=1 } END { exit ok ? 0 : 1 }'
             echo "BOTTLE_INSTALLED ${name} ${pkgver}"
           }
