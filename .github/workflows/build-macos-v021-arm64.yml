@@ -33,6 +33,7 @@ jobs:
       HOMEBREW_NO_INSTALL_UPGRADE: "1"
       HOMEBREW_NO_ENV_HINTS: "1"
       HOMEBREW_NO_BOTTLE_SOURCE_FALLBACK: "1"
+      HOMEBREW_NO_INSTALL_FROM_API: "1"
       NONINTERACTIVE: "1"
       MACOSX_DEPLOYMENT_TARGET: "15.0"
     steps:
@@ -81,6 +82,38 @@ jobs:
       - name: Install the pinned Homebrew bottles
         run: |
           set -euo pipefail
+          core_sha="b665a4681f55b9f228a23c01b1646dcd882ff338"
+          tap="$(brew --repo homebrew/core)"
+          case "${tap}" in
+            */homebrew/homebrew-core) ;;
+            *) echo "FAIL: homebrew core tap location" >&2; exit 1 ;;
+          esac
+          rm -rf "${tap}"
+          mkdir -p "${tap}"
+          git -C "${tap}" init -q
+          git -C "${tap}" remote add origin https://github.com/Homebrew/homebrew-core.git
+          git -C "${tap}" fetch --depth 1 origin "${core_sha}"
+          git -C "${tap}" checkout --detach FETCH_HEAD
+          test "$(git -C "${tap}" rev-parse HEAD)" = "${core_sha}"
+          echo "HOMEBREW_CORE=${core_sha}"
+          python3 -c '
+          import json, subprocess, sys
+          expected = {
+              "jpeg-turbo": ("3.2.1", "arm64_sequoia", "802413c7772789ae8c9d0444042e9a766bcff1beae3919ea5716022aa9dafce7"),
+              "boost": ("1.92.0_1", "arm64_sequoia", "bc88ce997d845e2aac0a1cebc6c89447ae4c31489064f000744fa5c3683c48a6"),
+              "qt@5": ("5.15.19", "arm64_sequoia", "f9981c2cffae3a70a3e9c09e2b581c74566a2dd9294c6dee6e01ff6facf7935f"),
+          }
+          for name, (pkgver, tag, sha) in expected.items():
+              data = json.loads(subprocess.check_output(["brew", "info", "--json=v2", name], text=True))["formulae"][0]
+              revision = int(data.get("revision") or 0)
+              stable = data["versions"]["stable"]
+              got_ver = stable if revision == 0 else "%s_%s" % (stable, revision)
+              got_sha = data["bottle"]["stable"]["files"][tag]["sha256"]
+              if got_ver != pkgver or got_sha != sha:
+                  sys.stderr.write("FAIL: %s formula %s %s\n" % (name, got_ver, got_sha))
+                  sys.exit(1)
+              print("FORMULA_OK %s %s" % (name, got_ver))
+          '
           pour() {
             local name="$1" pkgver="$2" tag="$3" sha="$4" url="$5"
             local repo token file got
