@@ -101,19 +101,19 @@ jobs:
               exit 1
             fi
             echo "BOTTLE_SHA_OK ${name} ${pkgver}"
-            python3 - "${name}" "${pkgver}" "${tag}" "${sha}" <<'PY'
-import json, subprocess, sys
-name, pkgver, tag, sha = sys.argv[1:5]
-data = json.loads(subprocess.check_output(["brew", "info", "--json=v2", name], text=True))["formulae"][0]
-revision = int(data.get("revision") or 0)
-stable = data["versions"]["stable"]
-got_ver = stable if revision == 0 else f"{stable}_{revision}"
-got_sha = data["bottle"]["stable"]["files"][tag]["sha256"]
-if got_ver != pkgver or got_sha != sha:
-    sys.stderr.write(f"FAIL: {name} API bottle {got_ver} {got_sha}\n")
-    sys.exit(1)
-print(f"BOTTLE_API_OK {name} {got_ver}")
-PY
+            python3 -c '
+          import json, subprocess, sys
+          name, pkgver, tag, sha = sys.argv[1:5]
+          data = json.loads(subprocess.check_output(["brew", "info", "--json=v2", name], text=True))["formulae"][0]
+          revision = int(data.get("revision") or 0)
+          stable = data["versions"]["stable"]
+          got_ver = stable if revision == 0 else f"{stable}_{revision}"
+          got_sha = data["bottle"]["stable"]["files"][tag]["sha256"]
+          if got_ver != pkgver or got_sha != sha:
+              sys.stderr.write("FAIL: %s API bottle %s %s\n" % (name, got_ver, got_sha))
+              sys.exit(1)
+          print("BOTTLE_API_OK %s %s" % (name, got_ver))
+            ' "${name}" "${pkgver}" "${tag}" "${sha}"
             if brew list --versions "${name}" 2>/dev/null | awk -v n="${name}" -v v="${pkgver}" '$1==n && $2==v { ok=1 } END { exit ok ? 0 : 1 }'; then
               echo "BOTTLE_PRESENT ${name} ${pkgver}"
               return 0
