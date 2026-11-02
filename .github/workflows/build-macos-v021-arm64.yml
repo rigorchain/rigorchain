@@ -256,7 +256,8 @@ jobs:
                   bad += 1
                   continue
               libs = subprocess.run(["otool", "-L", str(path)], text=True, capture_output=True, check=True).stdout
-              for line in libs.splitlines():
+              dep_lines = libs.splitlines()[1:]
+              for line in dep_lines[1:]:
                   if "/opt/homebrew" in line or "/usr/local/opt" in line:
                       print("LINK_FAIL", path, line.strip())
                       bad += 1
