@@ -15,8 +15,7 @@ import {
   listResMints,
 } from "./db";
 import type { Config } from "./config";
-import { buildStatusDashboard } from "./api/status";
-import { buildOruEconomicsView } from "./api/oruEconomics";
+import { readCachedOruEconomics, readCachedStatus } from "./statusCache";
 import { getRfc018FeeBurnAtHeight } from "./rfc018FeeBurnStore";
 import { blockListPageMeta, parseBlockListQuery } from "./blocksList";
 import { listResTransferPage } from "./resTransferQuery";
@@ -136,22 +135,26 @@ export function registerApiRoutes(app: Express, pool: Pool, config: Config): voi
       res.json({ events: rows });
     });
 
-    app.get(`${prefix}/status`, async (_req, res) => {
-      try {
-        const dashboard = await buildStatusDashboard(config, pool);
-        res.json(dashboard);
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
-      }
+    app.get(`${prefix}/status`, (_req, res) => {
+      res.json(readCachedStatus());
     });
 
-    app.get(`${prefix}/oru/economics`, async (_req, res) => {
-      try {
-        const view = await buildOruEconomicsView(config, pool);
-        res.json(view);
-      } catch (e) {
-        res.status(500).json({ error: String(e) });
+    app.get(`${prefix}/oru/economics`, (_req, res) => {
+      const cached = readCachedOruEconomics();
+      if (cached.status !== "ready" || cached.view == null) {
+        res.json({
+          status: cached.status,
+          snapshot: {
+            freshness: cached.status === "loading" ? "Loading…" : "Unavailable",
+            indexer_height: null,
+          },
+          sections: {},
+          explanation: "",
+          cache: cached.cache,
+        });
+        return;
       }
+      res.json({ ...cached.view, status: "ready", cache: cached.cache });
     });
 
     app.get(`${prefix}/chain/tip`, async (_req, res) => {
@@ -341,19 +344,18 @@ export function registerUiRoutes(app: Express, pool: Pool, publicDir: string, co
   });
 
   if (config) {
-    app.get("/", async (req, res, next) => {
+    app.get("/", (req, res, next) => {
       if (!wantsHtmlPage(req) && (req.headers.accept ?? "").includes("application/json")) return next();
-      try {
-        const dashboard = await buildStatusDashboard(config, pool);
+      const dashboard = readCachedStatus();
+      if (dashboard.cache.live_status === "ready" && dashboard.cache.economic_status === "ready") {
         const html = injectSsrRoot(
           readPublicTemplate(publicDir, "index.html"),
           renderStatusRoot(dashboard as unknown as Record<string, unknown>),
         );
         sendSsrHtml(res, html);
-      } catch (e) {
-        console.error("SSR / failed:", e);
-        sendPublic(res, publicDir, "index.html");
+        return;
       }
+      sendPublic(res, publicDir, "index.html");
     });
   }
 

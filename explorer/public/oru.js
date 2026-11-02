@@ -53,6 +53,15 @@
   var inFlight = false;
   var refreshTimer = null;
   var refreshStarted = false;
+  var loadingRetry = null;
+
+  function scheduleLoadingRetry() {
+    if (loadingRetry != null) return;
+    loadingRetry = setTimeout(function () {
+      loadingRetry = null;
+      load().catch(function () {});
+    }, 2000);
+  }
 
   function documentHidden() {
     return typeof document !== "undefined" && document.visibilityState === "hidden";
@@ -70,7 +79,15 @@
         if (!root.querySelector(".status-card")) root.textContent = "Failed to load ORU statistics: HTTP " + response.status;
         return;
       }
-      root.innerHTML = renderOruPage(await response.json());
+      const data = await response.json();
+      if (data && (data.status === "loading" || data.status === "refresh_failed") && !(data.sections && data.sections.destruction)) {
+        if (!root.querySelector(".status-card")) {
+          root.textContent = data.status === "loading" ? "Loading…" : "Unavailable";
+        }
+        if (data.status === "loading") scheduleLoadingRetry();
+        return;
+      }
+      root.innerHTML = renderOruPage(data);
     } catch (e) {
       if (!root.querySelector(".status-card")) root.textContent = "Failed: " + String(e);
     } finally {
@@ -117,6 +134,10 @@
 
   function stop() {
     disarm();
+    if (loadingRetry != null) {
+      clearTimeout(loadingRetry);
+      loadingRetry = null;
+    }
     if (!refreshStarted) return;
     refreshStarted = false;
     document.removeEventListener("visibilitychange", onVisibility);

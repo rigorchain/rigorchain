@@ -15,6 +15,25 @@
     return escapeHtml(v);
   }
 
+  function snapshotText(data, value) {
+    if (value !== null && value !== undefined && value !== "") return fmt(value);
+    var cache = data && data.cache;
+    if (cache && cache.economic_status === "loading") return "Loading…";
+    if (cache && cache.economic_status === "refresh_failed") return "Unavailable";
+    return fmt(value);
+  }
+
+  function snapshotAge(data) {
+    var cache = data && data.cache;
+    if (!cache || cache.economic_generated_at == null) return "";
+    if (cache.economic_status === "loading") return "Loading…";
+    if (cache.economic_status === "refresh_failed" && cache.cache_age_seconds == null) return "Unavailable";
+    var age = cache.cache_age_seconds;
+    var label = age == null ? "cached" : "cached " + age + "s";
+    if (cache.stale) label += ", updating";
+    return label;
+  }
+
   function dlRow(label, value) {
     return `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>`;
   }
@@ -91,13 +110,13 @@
       ].concat(sys.rpc_error ? [dlRow("RPC", fmt(sys.rpc_error))] : [])),
       renderSection("Issuance", [
         dlRow("Issued ORU", fmt(issued)),
-        dlRow("RES minted", fmt(eco.network_res_minted_display)),
+        dlRow("RES minted", snapshotText(data, eco.network_res_minted_display)),
         dlRow("Convergence destroyed ORU", fmt(eco.cumulative_convergence_display ?? eco.oru_burned_lifetime_display)),
         dlRow("ORU destroyed to mint 1 RES", fmt(eco.res_destroy_cost_display)),
         dlRow("Confirming height", fmt(eco.confirm_height ?? eco.tip_height)),
         dlRow("ORU subsidy", fmt(eco.oru_subsidy_tip_display)),
         dlRow("Last mint height", fmt(eco.last_res_height)),
-      ]),
+      ].concat(snapshotAge(data) ? [dlRow("Snapshot", snapshotAge(data))] : [])),
     ];
 
     return `
@@ -110,6 +129,7 @@
   var inFlight = false;
   var refreshTimer = null;
   var refreshStarted = false;
+  var loadingRetry = null;
 
   function documentHidden() {
     return typeof document !== "undefined" && document.visibilityState === "hidden";
@@ -152,9 +172,27 @@
       }
       const data = await r.json();
       applyDashboard(root, renderDashboard(data));
+      scheduleSnapshotRetry(data);
     } finally {
       inFlight = false;
     }
+  }
+
+  function scheduleSnapshotRetry(data) {
+    var cache = data && data.cache;
+    var waiting = cache && (cache.economic_status === "loading" || cache.live_status === "loading");
+    if (!waiting) {
+      if (loadingRetry != null) {
+        clearTimeout(loadingRetry);
+        loadingRetry = null;
+      }
+      return;
+    }
+    if (loadingRetry != null) return;
+    loadingRetry = setTimeout(function () {
+      loadingRetry = null;
+      load({ preserve: true }).catch(function () {});
+    }, 2000);
   }
 
   function disarmRefresh() {
@@ -210,6 +248,10 @@
 
   function stopAutoRefresh() {
     disarmRefresh();
+    if (loadingRetry != null) {
+      clearTimeout(loadingRetry);
+      loadingRetry = null;
+    }
     if (!refreshStarted) return;
     refreshStarted = false;
     document.removeEventListener("visibilitychange", onVisibility);

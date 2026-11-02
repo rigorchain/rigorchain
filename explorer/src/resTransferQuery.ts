@@ -21,46 +21,70 @@ export const RES_OUTPUT_SPENT_SQL = `
   )
 `;
 
+/**
+ * Canonical RES outputs that also spend RES. The sender aggregate is applied
+ * only to the page of txids, not to every historical RES input.
+ */
 const TRANSFER_FROM = `
   FROM transactions t
   JOIN blocks b ON b.block_hash = t.block_hash
   JOIN outputs o ON o.txid = t.txid AND o.asset_kind = 'RES' AND o.value_atoms > 0
-  JOIN (
-    SELECT i.txid,
-           COUNT(DISTINCT prev.address) FILTER (
-             WHERE prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NOT NULL
-           )::int AS sender_addresses,
-           BOOL_OR(prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NULL) AS sender_missing,
-           MIN(prev.address) FILTER (
-             WHERE prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NOT NULL
-           ) AS sender_address
-    FROM inputs i
-    JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
-    JOIN transactions it ON it.txid = i.txid
-    JOIN blocks ib ON ib.block_hash = it.block_hash
-    WHERE prev.asset_kind = 'RES' AND prev.value_atoms > 0
-    GROUP BY i.txid
-  ) senders ON senders.txid = t.txid
   WHERE NOT t.is_coinbase
     AND NOT EXISTS (SELECT 1 FROM res_mints rm WHERE rm.mint_txid = t.txid)
+    AND EXISTS (
+      SELECT 1
+      FROM inputs i
+      JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+      WHERE i.txid = t.txid
+        AND prev.asset_kind = 'RES'
+        AND prev.value_atoms > 0
+    )
 `;
 
 export function resTransferListSql(): string {
   return `
-    SELECT b.height::text AS height,
-           b.block_hash,
-           b.time::text AS time,
-           t.block_tx_index::text AS tx_index,
-           t.txid,
-           o.vout_index::text AS vout,
-           o.value_atoms::text AS amount_atoms,
-           o.address AS recipient,
+    WITH page AS (
+      SELECT b.height::text AS height,
+             b.block_hash,
+             b.time::text AS time,
+             t.block_tx_index::text AS tx_index,
+             t.txid,
+             o.vout_index::text AS vout,
+             o.value_atoms::text AS amount_atoms,
+             o.address AS recipient
+      ${TRANSFER_FROM}
+      ORDER BY b.height DESC, t.block_tx_index DESC, o.vout_index ASC, t.txid ASC
+      LIMIT $1 OFFSET $2
+    )
+    SELECT page.height,
+           page.block_hash,
+           page.time,
+           page.tx_index,
+           page.txid,
+           page.vout,
+           page.amount_atoms,
+           page.recipient,
            senders.sender_addresses::text AS sender_addresses,
            senders.sender_missing,
            senders.sender_address
-    ${TRANSFER_FROM}
-    ORDER BY b.height DESC, t.block_tx_index DESC, o.vout_index ASC, t.txid ASC
-    LIMIT $1 OFFSET $2
+    FROM page
+    JOIN (
+      SELECT i.txid,
+             COUNT(DISTINCT prev.address) FILTER (
+               WHERE prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NOT NULL
+             )::int AS sender_addresses,
+             BOOL_OR(prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NULL) AS sender_missing,
+             MIN(prev.address) FILTER (
+               WHERE prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NOT NULL
+             ) AS sender_address
+      FROM inputs i
+      JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+      WHERE i.txid IN (SELECT txid FROM page)
+        AND prev.asset_kind = 'RES'
+        AND prev.value_atoms > 0
+      GROUP BY i.txid
+    ) senders ON senders.txid = page.txid
+    ORDER BY page.height DESC, page.tx_index DESC, page.vout ASC, page.txid ASC
   `;
 }
 

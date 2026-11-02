@@ -323,6 +323,25 @@ function statusFmt(v: unknown): string {
   return escapeHtml(v);
 }
 
+function statusSnapshotText(data: Record<string, unknown>, value: unknown): string {
+  if (value !== null && value !== undefined && value !== "") return statusFmt(value);
+  const cache = data.cache as Record<string, unknown> | undefined;
+  if (cache?.economic_status === "loading") return "Loading…";
+  if (cache?.economic_status === "refresh_failed") return "Unavailable";
+  return statusFmt(value);
+}
+
+function statusSnapshotAge(data: Record<string, unknown>): string {
+  const cache = data.cache as Record<string, unknown> | undefined;
+  if (!cache || cache.economic_generated_at == null) return "";
+  if (cache.economic_status === "loading") return "Loading…";
+  if (cache.economic_status === "refresh_failed" && cache.cache_age_seconds == null) return "Unavailable";
+  const age = cache.cache_age_seconds;
+  let label = age == null ? "cached" : `cached ${age}s`;
+  if (cache.stale) label += ", updating";
+  return label;
+}
+
 function statusMonoHash(h: unknown): string {
   const s = String(h ?? "");
   if (!s) return "—";
@@ -429,15 +448,18 @@ export function renderStatusRoot(data: Record<string, unknown>): string {
       statusDl("Mempool tx count", statusFmt(mine.mempool_tx_count)),
     ]),
     statusSection("Indexer integrity", indexerRows),
-    statusSection("Issuance", [
-      statusDl("Issued ORU", statusFmt(issued)),
-      statusDl("RES minted", statusFmt(eco.network_res_minted_display)),
-      statusDl("Convergence destroyed ORU", statusFmt(eco.cumulative_convergence_display ?? eco.oru_burned_lifetime_display)),
-      statusDl("ORU destroyed to mint 1 RES", statusFmt(eco.res_destroy_cost_display)),
-      statusDl("Confirming height", statusFmt(eco.confirm_height ?? eco.tip_height)),
-      statusDl("ORU subsidy", statusFmt(eco.oru_subsidy_tip_display)),
-      statusDl("Last mint height", statusFmt(eco.last_res_height)),
-    ]),
+    statusSection(
+      "Issuance",
+      [
+        statusDl("Issued ORU", statusFmt(issued)),
+        statusDl("RES minted", statusSnapshotText(data, eco.network_res_minted_display)),
+        statusDl("Convergence destroyed ORU", statusFmt(eco.cumulative_convergence_display ?? eco.oru_burned_lifetime_display)),
+        statusDl("ORU destroyed to mint 1 RES", statusFmt(eco.res_destroy_cost_display)),
+        statusDl("Confirming height", statusFmt(eco.confirm_height ?? eco.tip_height)),
+        statusDl("ORU subsidy", statusFmt(eco.oru_subsidy_tip_display)),
+        statusDl("Last mint height", statusFmt(eco.last_res_height)),
+      ].concat(statusSnapshotAge(data) ? [statusDl("Snapshot", statusSnapshotAge(data))] : []),
+    ),
   ];
 
   return `<p class="network-mark">NETWORK <strong>${escapeHtml(net)}</strong></p><div class="status-grid status-grid--pair">${sections.join("")}</div>`;
