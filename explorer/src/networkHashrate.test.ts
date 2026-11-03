@@ -147,7 +147,7 @@ describe("50-block network hashrate", () => {
     assert.equal(view.hashes_per_second, ((50n * WORK_2_223) / 30400n).toString());
   });
 
-  it("rejects a backward step even when median time past would still allow it", () => {
+  it("estimates across a backward step that still clears median time past", () => {
     const blocks = chain(51);
     const previous = Number(blocks[48]?.time);
     blocks[49] = { ...blocks[49], time: previous + 5135 };
@@ -155,13 +155,44 @@ describe("50-block network hashrate", () => {
     assert.equal(childClearsParentMedian(blocks, 50), true);
     const whileJumpIsAhead = estimateNetworkHashrate(blocks, previous + 5135 - 700);
     assert.equal(whileJumpIsAhead.available, false);
+    assert.equal(whileJumpIsAhead.reason, "future_timestamp");
     assert.equal(whileJumpIsAhead.display, HASHRATE_UNAVAILABLE);
     clearNetworkHashrateCache();
     const view = estimateNetworkHashrate(blocks, previous + 5135 + 30);
+    assert.equal(view.available, true);
+    assert.equal(view.reason, null);
+    assert.equal(view.elapsed_seconds, 48 * 600 + 3160);
+    assert.equal(view.work, (50n * WORK_2_223).toString());
+    assert.equal(view.display !== HASHRATE_UNAVAILABLE, true);
+  });
+
+  it("keeps the estimate when one header is about two minutes behind its parent", () => {
+    const blocks = chain(61, { origin: 2130 });
+    const dipIndex = blocks.findIndex((block) => block.height === 2186);
+    const parent = blocks[dipIndex - 1];
+    const dipped = blocks[dipIndex];
+    if (!parent || !dipped) throw new Error("missing dip headers");
+    blocks[dipIndex] = { ...dipped, time: Number(parent.time) - 104 };
+    assert.equal(childClearsParentMedian(blocks, 2186), true);
+    const view = estimateNetworkHashrate(blocks, nowAfter(blocks));
+    const start = blocks.find((block) => block.height === 2140);
+    const tip = blocks.find((block) => block.height === 2190);
+    assert.ok(start && tip);
+    assert.equal(view.available, true);
+    assert.equal(view.reason, null);
+    assert.equal(view.elapsed_seconds, Number(tip.time) - Number(start.time));
+    assert.equal(view.elapsed_seconds, 50 * 600);
+  });
+
+  it("rejects a backward step that does not clear median time past", () => {
+    const blocks = chain(51);
+    const parent = Number(blocks[49]?.time);
+    blocks[50] = { ...blocks[50], time: parent - 4000 };
+    assert.equal(childClearsParentMedian(blocks, 50), false);
+    const view = estimateNetworkHashrate(blocks, parent + 30);
     assert.equal(view.available, false);
-    assert.equal(view.reason, "non_monotonic_timestamp");
+    assert.equal(view.reason, "median_time_past");
     assert.equal(view.display, HASHRATE_UNAVAILABLE);
-    assert.equal(view.hashes_per_second, null);
   });
 
   it("rejects a zero-length interval and does not display zero", () => {

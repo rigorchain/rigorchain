@@ -6,6 +6,11 @@
  *
  * The 50-block figure is an estimate of hashes per second implied by block work,
  * not a measurement of miner hardware and not a pool-reported hashrate.
+ *
+ * Header time is not required to increase. A later header may step backward or
+ * repeat its parent's timestamp. Elapsed time is still time(H) - time(H-50).
+ * A backward or equal step stays in the estimate when the child is strictly
+ * above the parent's median time past and is not too far ahead of the clock.
  */
 
 import { parseBitsToUint32 } from "./consensusFingerprint";
@@ -34,6 +39,12 @@ export const HASHRATE_UNAVAILABLE = "Unavailable";
 
 const UNITS = ["H/s", "kH/s", "MH/s", "GH/s", "TH/s", "PH/s"] as const;
 
+/**
+ * `non_monotonic_timestamp` is kept so an older status payload still matches
+ * this type. A backward header time is not that reason: it stays in the
+ * estimate, or it is `median_time_past` when the child is not above the
+ * parent's median.
+ */
 export type HashrateUnavailableReason =
   | "insufficient_history"
   | "missing_block_data"
@@ -284,12 +295,13 @@ function compute(blocks: readonly HashrateBlock[], nowSeconds: number): NetworkH
   if (!boundary) return unavailable("missing_block_data");
   if (blockWorkFromCompact(boundary.bits) == null) return unavailable("invalid_bits");
 
+  const elapsed = BigInt(tip.time) - BigInt(boundary.time);
+  if (elapsed <= 0n) return unavailable("non_positive_elapsed");
+
   for (let i = 1; i < window.length; i++) {
     const parent = window[i - 1];
     const child = window[i];
     if (!parent || !child) return unavailable("missing_block_data");
-    if (child.time < parent.time) return unavailable("non_monotonic_timestamp");
-    if (child.time === parent.time) return unavailable("non_positive_elapsed");
     if (child.time < 0 || parent.time < 0) return unavailable("implausible_interval");
     const delta = child.time - parent.time;
     if (child.time > nowSeconds + MAX_FUTURE_BLOCK_TIME_SECONDS) return unavailable("future_timestamp");
@@ -300,8 +312,6 @@ function compute(blocks: readonly HashrateBlock[], nowSeconds: number): NetworkH
     if (child.time <= mtp) return unavailable("median_time_past");
   }
 
-  const elapsed = BigInt(tip.time) - BigInt(boundary.time);
-  if (elapsed <= 0n) return unavailable("non_positive_elapsed");
   const perSecond = work / elapsed;
   return {
     label: HASHRATE_LABEL,
