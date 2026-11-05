@@ -7,6 +7,7 @@ import { importerTick } from "./importer";
 import { getImporterRecoveryState } from "./importerRecovery";
 import { logMismatchEvent } from "./mismatchLog";
 import { registerApiRoutes, registerUiRoutes, wantsHtmlPage } from "./registerRoutes";
+import { notifyIndexerHeight, startExplorerCaches, stopExplorerCaches } from "./statusCache";
 import { createRateLimitMiddleware } from "./rateLimit";
 import { assertFailClosedStartup } from "./startupGuard";
 
@@ -104,6 +105,10 @@ async function main(): Promise<void> {
         // Reorg handling may truncate and re-import; keep API serving reads from stable DB.
       }
       const chainAfter = await getOrCreateChainState(pool, config);
+      if (chainBefore.last_height !== chainAfter.last_height) {
+        const height = Number(chainAfter.last_height);
+        if (Number.isFinite(height)) notifyIndexerHeight(height);
+      }
       if (chainBefore.critical_root_mismatch !== chainAfter.critical_root_mismatch) {
         await updateChainState(pool, config, { critical_root_mismatch: chainAfter.critical_root_mismatch });
       }
@@ -117,12 +122,21 @@ async function main(): Promise<void> {
   // Bind IPv4 explicitly. Node's default (::) breaks WSL2 Windows localhost forwarding
   // (ERR_CONNECTION_REFUSED on http://127.0.0.1:PORT from the host browser).
   const apiHost = process.env.API_HOST?.trim() || "0.0.0.0";
-  app.listen(config.apiPort, apiHost, () => {
+  startExplorerCaches(config, pool);
+  const server = app.listen(config.apiPort, apiHost, () => {
     console.log(`Explorer indexer MVP listening on http://127.0.0.1:${config.apiPort} (${apiHost})`);
   });
 
   await runTick();
-  setInterval(runTick, config.pollIntervalMs);
+  const tickTimer = setInterval(runTick, config.pollIntervalMs);
+  const shutdown = (signal: string) => {
+    console.log(`Explorer shutting down (${signal})`);
+    clearInterval(tickTimer);
+    stopExplorerCaches();
+    server.close(() => process.exit(0));
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((e) => {

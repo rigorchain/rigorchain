@@ -15,12 +15,28 @@ import {
   resDestroyCostForHeight,
 } from "../resIssuanceSchedule";
 import { backfillMissingRfc018FeeBurn, getRfc018FeeBurnAtHeight } from "../rfc018FeeBurnStore";
+import { estimateNetworkHashrate } from "../networkHashrate";
 
 /** FVR-M compliance display — read-only, never computed at runtime. */
 export const DRAW_STATUS_DISPLAY = "ORU destroyed. RES minted.";
 
 export const RPC_AUTHORITY_DISCLAIMER =
   "All values are authoritative from rigord RPC. No local consensus computation is performed.";
+
+export type SnapshotFreshness = "ready" | "loading" | "refresh_failed";
+
+/** Observable cache metadata. Economic figures keep their formulas; this only says how old they are. */
+export type StatusCacheMeta = {
+  economic_status: SnapshotFreshness;
+  economic_generated_at: string | null;
+  snapshot_height: number | null;
+  cache_age_seconds: number | null;
+  stale: boolean;
+  live_status: SnapshotFreshness;
+  live_generated_at: string | null;
+  live_age_seconds: number | null;
+  last_refresh_error: string | null;
+};
 
 export type StatusDashboard = {
   generated_at: string;
@@ -31,6 +47,41 @@ export type StatusDashboard = {
   economic_snapshot: Record<string, unknown>;
   mining_activity: Record<string, unknown>;
   system_integrity: Record<string, unknown>;
+  cache: StatusCacheMeta;
+};
+
+export type LiveStatusParts = {
+  chainState: Awaited<ReturnType<typeof getOrCreateChainState>>;
+  compliance: Awaited<ReturnType<typeof buildCompliancePayload>>;
+  blockchainInfo: Record<string, unknown>;
+  networkInfo: Record<string, unknown>;
+  convStatus: Record<string, unknown>;
+  runtimeSupply: Record<string, unknown>;
+  mempoolTxids: string[];
+  rpcError: string | null;
+  blocks: Array<Record<string, unknown>>;
+  avgBlockTime: number | null;
+  networkHashrate: ReturnType<typeof estimateNetworkHashrate>;
+  tipBlock: Record<string, unknown> | null;
+  fSizes: number[];
+  mintBlocks: number;
+  rootChanges: number;
+  mismatchBlocks: number;
+  reorgMismatchBlocks: number;
+  walletObserver: Record<string, unknown>;
+  indexerHeight: number;
+  nodeHeight: number;
+};
+
+export type EconomicAggregates = {
+  indexerHeight: number;
+  indexerBlockHash: string | null;
+  eco: Record<string, unknown>;
+  oruSupplyConsistent: boolean;
+  oruSupplyErrors: string[];
+  rfc018FeeBurn: Record<string, unknown>;
+  plainDestroyAtoms: bigint;
+  plainDestroyDisplay: string;
 };
 
 /** getblockchaininfo / getruntimesupply amounts are ValueFromAmount decimals; asAtoms treats the value as integer atoms. */
@@ -114,7 +165,25 @@ async function fetchWalletObserverStatus(): Promise<Record<string, unknown>> {
   }
 }
 
-export async function buildStatusDashboard(config: Config, pool: Pool): Promise<StatusDashboard> {
+function isoOrNull(ms: number | null): string | null {
+  if (ms == null || !Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString();
+}
+
+function ecoString(economic: EconomicAggregates | null, key: string): string | null {
+  if (!economic) return null;
+  const value = economic.eco[key];
+  return value == null ? "0" : String(value);
+}
+
+function ecoCount(economic: EconomicAggregates | null, key: string): number | null {
+  if (!economic) return null;
+  const value = economic.eco[key];
+  return value == null ? 0 : Number(value);
+}
+
+/** Node height, peers, and the small recent-block window. No full-chain economic scan. */
+export async function loadLiveStatus(config: Config, pool: Pool): Promise<LiveStatusParts> {
   const chainState = await getOrCreateChainState(pool, config);
   const compliance = await buildCompliancePayload(config, chainState);
 
@@ -159,6 +228,8 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
   const blocks = blockWindow.rows;
   const times = blocks.map((b) => Number(b.time)).filter((t) => Number.isFinite(t));
   const avgBlockTime = averageBlockTimeSeconds(times);
+  // Same 100-block read already used for average interval. No extra history scan.
+  const networkHashrate = estimateNetworkHashrate(blocks, Math.floor(Date.now() / 1000));
 
   const tipBlock = blocks[0] ?? null;
 
@@ -177,6 +248,44 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
   const rootChanges = new Set(blocks.map((b) => String(b.committed_root ?? ""))).size;
   const mismatchBlocks = blocks.filter((b) => b.mismatch).length;
 
+  const reorgWindow = await pool.query(
+    `
+      SELECT COUNT(*)::int AS mismatch_blocks
+      FROM blocks
+      WHERE mismatch = TRUE
+        AND height > GREATEST(0, (SELECT COALESCE(MAX(height), 0) FROM blocks) - 1000)
+    `,
+  );
+  const walletObserver = await fetchWalletObserverStatus();
+
+  return {
+    chainState,
+    compliance,
+    blockchainInfo,
+    networkInfo,
+    convStatus,
+    runtimeSupply,
+    mempoolTxids,
+    rpcError,
+    blocks,
+    avgBlockTime,
+    networkHashrate,
+    tipBlock,
+    fSizes,
+    mintBlocks,
+    rootChanges,
+    mismatchBlocks,
+    reorgMismatchBlocks: Number(reorgWindow.rows[0]?.mismatch_blocks ?? 0),
+    walletObserver,
+    indexerHeight,
+    nodeHeight,
+  };
+}
+
+/** Full-chain ORU/RES aggregates. Callers share one snapshot; HTTP requests must not call this directly. */
+export async function loadEconomicAggregates(config: Config, pool: Pool): Promise<EconomicAggregates> {
+  const chainState = await getOrCreateChainState(pool, config);
+  const indexerHeight = Number(chainState.last_height);
   const economic = await pool.query(
     `
       SELECT
@@ -269,13 +378,6 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
       }),
     );
   }
-  const tipForRate = nodeHeight >= 0 ? nodeHeight : indexerHeight;
-  const rpcConfirm = Number(convStatus.confirm_height);
-  const confirmHeight =
-    Number.isFinite(rpcConfirm) && rpcConfirm >= 0
-      ? rpcConfirm
-      : confirmHeightForTip(Number.isFinite(tipForRate) ? tipForRate : 0);
-  const resRateAtoms = resDestroyCostForHeight(confirmHeight);
   let feeBurnAtTip: Awaited<ReturnType<typeof getRfc018FeeBurnAtHeight>> = null;
   try {
     if (indexerHeight >= 0) {
@@ -288,80 +390,167 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
   } catch {
     feeBurnAtTip = null;
   }
-  const rfc018FeeBurn = {
-    ...rfc018FeeBurnView(
-      feeBurnAtTip?.burned_oru ?? 0n,
-      feeBurnAtTip?.cumulative_burned_oru ?? 0n,
-      atomsToOruDisplay,
-    ),
-    indexed: feeBurnAtTip != null,
-    height: feeBurnAtTip != null && indexerHeight >= 0 ? String(indexerHeight) : null,
+  const feeCumulative = feeBurnAtTip?.cumulative_burned_oru ?? null;
+  const rfc018FeeBurn =
+    feeBurnAtTip != null && feeCumulative != null
+      ? {
+          ...rfc018FeeBurnView(feeBurnAtTip.burned_oru, feeCumulative, atomsToOruDisplay),
+          indexed: true,
+          height: indexerHeight >= 0 ? String(indexerHeight) : null,
+        }
+      : {
+          block_burned_oru: feeBurnAtTip ? feeBurnAtTip.burned_oru.toString() : null,
+          cumulative_burned_oru: null,
+          block_burned_oru_display: feeBurnAtTip ? atomsToOruDisplay(feeBurnAtTip.burned_oru) : null,
+          cumulative_burned_oru_display: null,
+          equivalence_claimed: false as const,
+          indexed: false,
+          height: null,
+        };
+  const plainDestroyAtoms = atomsFromSql(eco.oru_plain_destroy_atoms);
+  const plainDestroyDisplay = atomsToOruDisplay(plainDestroyAtoms);
+
+  return {
+    indexerHeight,
+    indexerBlockHash: chainState.last_block_hash,
+    eco,
+    oruSupplyConsistent: oruSupplyAccounting.consistent,
+    oruSupplyErrors: oruSupplyAccounting.errors,
+    rfc018FeeBurn,
+    plainDestroyAtoms,
+    plainDestroyDisplay,
   };
+}
+
+export function freshStatusCache(snapshotHeight: number | null, now = Date.now()): StatusCacheMeta {
+  const at = new Date(now).toISOString();
+  return {
+    economic_status: "ready",
+    economic_generated_at: at,
+    snapshot_height: snapshotHeight,
+    cache_age_seconds: 0,
+    stale: false,
+    live_status: "ready",
+    live_generated_at: at,
+    live_age_seconds: 0,
+    last_refresh_error: null,
+  };
+}
+
+export function loadingStatusCache(): StatusCacheMeta {
+  return {
+    economic_status: "loading",
+    economic_generated_at: null,
+    snapshot_height: null,
+    cache_age_seconds: null,
+    stale: false,
+    live_status: "loading",
+    live_generated_at: null,
+    live_age_seconds: null,
+    last_refresh_error: null,
+  };
+}
+
+const FEE_BURN_UNAVAILABLE = {
+  block_burned_oru: null,
+  cumulative_burned_oru: null,
+  block_burned_oru_display: null,
+  cumulative_burned_oru_display: null,
+  equivalence_claimed: false as const,
+  indexed: false,
+  height: null,
+};
+
+/** Combine a live node snapshot with a cached economic snapshot. Does not query. */
+export function assembleStatusDashboard(
+  live: LiveStatusParts | null,
+  economic: EconomicAggregates | null,
+  cache: StatusCacheMeta,
+): StatusDashboard {
+  const chainState = live?.chainState ?? null;
+  const compliance = live?.compliance ?? null;
+  const blockchainInfo = (live?.blockchainInfo ?? {}) as Record<string, any>;
+  const networkInfo = (live?.networkInfo ?? {}) as Record<string, any>;
+  const convStatus = (live?.convStatus ?? {}) as Record<string, any>;
+  const runtimeSupply = (live?.runtimeSupply ?? {}) as Record<string, any>;
+  const nodeHeight = live?.nodeHeight ?? -1;
+  const indexerHeight = live?.indexerHeight ?? -1;
+  const tipBlock = (live?.tipBlock ?? null) as Record<string, any> | null;
+  const eco = (economic?.eco ?? {}) as Record<string, any>;
+  const rfc018FeeBurn = (economic?.rfc018FeeBurn ?? FEE_BURN_UNAVAILABLE) as Record<string, any>;
   const totalIssuedDisplay =
     formatOruAmount(runtimeSupply.oru_subsidy_cumulative_derived) ??
     formatOruAmount(runtimeSupply.oru_supply_cumulative);
-  const circulatingDisplay = atomsToOruDisplay(String(eco.oru_utxo_atoms ?? "0"));
+  const utxoAtoms = ecoString(economic, "oru_utxo_atoms");
+  const circulatingDisplay = utxoAtoms == null ? null : atomsToOruDisplay(utxoAtoms);
   const convergenceDestroyedDisplay = formatOruAmount(blockchainInfo.cumulative_convergence);
-  const plainDestroyAtoms = atomsFromSql(eco.oru_plain_destroy_atoms);
-  const plainDestroyDisplay = atomsToOruDisplay(plainDestroyAtoms);
+  const plainDestroyAtoms = economic?.plainDestroyAtoms ?? null;
+  const plainDestroyDisplay = economic?.plainDestroyDisplay ?? null;
+  const mintedAtoms = ecoString(economic, "res_mint_total_atoms");
+  const mintedLast100 = ecoString(economic, "res_mint_last_100_atoms");
+  const matureAtoms = ecoString(economic, "oru_mature_transferable_atoms");
+  const immatureAtoms = ecoString(economic, "oru_immature_coinbase_atoms");
+  const coinbaseAtoms = ecoString(economic, "oru_coinbase_total_atoms");
+  const subsidySqlAtoms = ecoString(economic, "oru_subsidy_tip_atoms");
   const oruSubsidyScheduleDisplay = "Genesis 0 ORU; then 128 ORU/block forever";
-
-  const reorgWindow = await pool.query(
-    `
-      SELECT COUNT(*)::int AS mismatch_blocks
-      FROM blocks
-      WHERE mismatch = TRUE
-        AND height > GREATEST(0, (SELECT COALESCE(MAX(height), 0) FROM blocks) - 1000)
-    `,
-  );
-
-  const indexerUpdatedAt = chainState.updated_at instanceof Date ? chainState.updated_at.getTime() : Date.now();
+  const tipForRate = nodeHeight >= 0 ? nodeHeight : indexerHeight;
+  const rpcConfirm = Number(convStatus.confirm_height);
+  const confirmHeight =
+    Number.isFinite(rpcConfirm) && rpcConfirm >= 0
+      ? rpcConfirm
+      : tipForRate >= 0
+        ? confirmHeightForTip(tipForRate)
+        : null;
+  const resRateAtoms = confirmHeight == null ? null : resDestroyCostForHeight(confirmHeight);
+  const indexerUpdatedAt =
+    chainState?.updated_at instanceof Date ? chainState.updated_at.getTime() : chainState ? Date.now() : null;
   const indexerLagBlocks =
     nodeHeight >= 0 && indexerHeight >= 0 ? Math.max(0, nodeHeight - indexerHeight) : null;
   const indexerLagSeconds =
     indexerLagBlocks === 0
       ? 0
-      : Math.max(0, Math.floor((Date.now() - indexerUpdatedAt) / 1000));
-
-  const walletObserver = await fetchWalletObserverStatus();
-
+      : indexerUpdatedAt == null
+        ? null
+        : Math.max(0, Math.floor((Date.now() - indexerUpdatedAt) / 1000));
   const networkLabel =
-    compliance.network === "testnet"
+    compliance?.network === "testnet"
       ? "testnet"
-      : compliance.network === "mainnet"
+      : compliance?.network === "mainnet"
         ? "mainnet"
-        : compliance.network;
+        : compliance?.network ?? null;
 
   return {
     generated_at: new Date().toISOString(),
     rpc_authority_disclaimer: RPC_AUTHORITY_DISCLAIMER,
+    cache,
     chain_identity: {
-      chain_name: compliance.chain_name,
-      product: compliance.product,
-      codename: compliance.codename,
+      chain_name: compliance?.chain_name ?? null,
+      product: compliance?.product ?? null,
+      codename: compliance?.codename ?? null,
       network: networkLabel,
-      network_type: compliance.network_type,
-      genesis_hash: compliance.genesis_hash,
-      genesis_hash_short: compliance.genesis_hash_short,
-      node_subversion: compliance.node_subversion ?? networkInfo.subversion ?? null,
-      node_release_version: compliance.node_release_version,
+      network_type: compliance?.network_type ?? null,
+      genesis_hash: compliance?.genesis_hash ?? null,
+      genesis_hash_short: compliance?.genesis_hash_short ?? null,
+      node_subversion: compliance?.node_subversion ?? networkInfo.subversion ?? null,
+      node_release_version: compliance?.node_release_version ?? null,
       node_version: networkInfo.version ?? null,
-      explorer_version: compliance.explorer_version,
+      explorer_version: compliance?.explorer_version ?? null,
       equivalence_claimed: EQUIVALENCE_CLAIMED,
     },
     block_health: {
       current_height_node: nodeHeight >= 0 ? nodeHeight : null,
       current_height_indexer: indexerHeight >= 0 ? indexerHeight : null,
-      best_block_hash: blockchainInfo.bestblockhash ?? chainState.last_block_hash,
-      avg_block_time_seconds_last_100: avgBlockTime,
+      best_block_hash: blockchainInfo.bestblockhash ?? chainState?.last_block_hash ?? null,
+      avg_block_time_seconds_last_100: live?.avgBlockTime ?? null,
       difficulty: blockchainInfo.difficulty ?? null,
       difficulty_label: "ASERT / OpuHash (node-reported)",
       bits: tipBlock?.bits ?? null,
+      network_hashrate: live?.networkHashrate ?? { available: false, display: "", note: "" },
       opus_hash: tipBlock?.opus_hash ?? null,
       pow_hash: tipBlock?.opus_hash ?? null,
       orphan_rate: null,
       orphan_rate_note: "Orphan blocks are not persisted in indexer schema",
-      reorg_signal_blocks_mismatch_last_1000: reorgWindow.rows[0]?.mismatch_blocks ?? 0,
+      reorg_signal_blocks_mismatch_last_1000: live?.reorgMismatchBlocks ?? null,
       reorg_count_note:
         "Full reorg count is not persisted; mismatch block count shown as integrity signal only",
       initialblockdownload: blockchainInfo.initialblockdownload ?? null,
@@ -369,28 +558,30 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
     },
     convergence_health: {
       issuance_status: DRAW_STATUS_DISPLAY,
-      mint_blocks_last_100: mintBlocks,
-      convergence_burns_last_100: fSizes.filter((n) => n > 0).length,
-      committed_root_stability: {
-        distinct_committed_roots_last_100: rootChanges,
-        mismatch_blocks_last_100: mismatchBlocks,
-        stable: mismatchBlocks === 0,
-      },
+      mint_blocks_last_100: live?.mintBlocks ?? null,
+      convergence_burns_last_100: live ? live.fSizes.filter((n) => n > 0).length : null,
+      committed_root_stability: live
+        ? {
+            distinct_committed_roots_last_100: live.rootChanges,
+            mismatch_blocks_last_100: live.mismatchBlocks,
+            stable: live.mismatchBlocks === 0,
+          }
+        : null,
       source: "indexed convergence_events + getconvergencestatus",
     },
     economic_snapshot: {
-      tip_height: nodeHeight >= 0 ? nodeHeight : indexerHeight,
+      tip_height: nodeHeight >= 0 ? nodeHeight : indexerHeight >= 0 ? indexerHeight : null,
       confirm_height: confirmHeight,
-      res_destroy_cost_atoms: resRateAtoms.toString(),
-      res_destroy_cost_display: formatRateOruPerRes(resRateAtoms),
+      res_destroy_cost_atoms: resRateAtoms == null ? null : resRateAtoms.toString(),
+      res_destroy_cost_display: resRateAtoms == null ? null : formatRateOruPerRes(resRateAtoms),
       res_derived_max_supply_atoms: RES_DERIVED_MAX_SUPPLY.toString(),
       res_derived_max_supply_display: formatDerivedMaxSupply(),
-      res_mint_count_last_100: eco.res_mint_count_last_100 ?? 0,
-      convergence_burns_last_100: eco.convergence_burns_last_100 ?? 0,
-      network_res_minted_display: atomsToResDisplay(String(eco.res_mint_total_atoms ?? "0")),
+      res_mint_count_last_100: ecoCount(economic, "res_mint_count_last_100"),
+      convergence_burns_last_100: ecoCount(economic, "convergence_burns_last_100"),
+      network_res_minted_display: mintedAtoms == null ? null : atomsToResDisplay(mintedAtoms),
       oru_burned_lifetime_display: convergenceDestroyedDisplay,
       cumulative_convergence_display: convergenceDestroyedDisplay,
-      oru_plain_destroy_atoms: plainDestroyAtoms.toString(),
+      oru_plain_destroy_atoms: plainDestroyAtoms == null ? null : plainDestroyAtoms.toString(),
       oru_plain_destroy_display: plainDestroyDisplay,
       rfc018_fee_burn: rfc018FeeBurn,
       supply_chart: {
@@ -404,7 +595,7 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
           source: "getblockchaininfo.cumulative_convergence (Convergence destroyed ORU)",
         },
         plain_destroy: {
-          atoms: plainDestroyAtoms.toString(),
+          atoms: plainDestroyAtoms == null ? null : plainDestroyAtoms.toString(),
           display: plainDestroyDisplay,
           source: "indexed OP_CONVERGE with no RES mint; subset of Convergence destroyed, not a fifth series",
         },
@@ -416,7 +607,7 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
           source: "explorer rfc018_fee_burn_stats (not consensus)",
         },
         oru_circulating_spendable: {
-          atoms: String(eco.oru_utxo_atoms ?? "0"),
+          atoms: utxoAtoms,
           display: circulatingDisplay,
           source:
             "indexed oru_utxos: unspent, not OP_CONVERGE, not retired CVG2, coinbase mature (indexer height)",
@@ -426,41 +617,42 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
         equivalence_claimed: EQUIVALENCE_CLAIMED,
       },
       oru_since_last_mint_display: formatOruAmount(blockchainInfo.current_convergence_sum),
-      oru_indexed_utxo_total_display: atomsToOruDisplay(String(eco.oru_utxo_atoms ?? "0")),
-      oru_circulating_spendable_display: atomsToOruDisplay(String(eco.oru_utxo_atoms ?? "0")),
-      oru_utxo_count: eco.oru_utxo_count ?? 0,
-      oru_mature_transferable_display: atomsToOruDisplay(String(eco.oru_mature_transferable_atoms ?? "0")),
-      oru_mature_transferable_count: eco.oru_mature_transferable_count ?? 0,
-      oru_immature_coinbase_display: atomsToOruDisplay(String(eco.oru_immature_coinbase_atoms ?? "0")),
-      oru_coinbase_total_display: atomsToOruDisplay(String(eco.oru_coinbase_total_atoms ?? "0")),
+      oru_indexed_utxo_total_display: circulatingDisplay,
+      oru_circulating_spendable_display: circulatingDisplay,
+      oru_utxo_count: ecoCount(economic, "oru_utxo_count"),
+      oru_mature_transferable_display: matureAtoms == null ? null : atomsToOruDisplay(matureAtoms),
+      oru_mature_transferable_count: ecoCount(economic, "oru_mature_transferable_count"),
+      oru_immature_coinbase_display: immatureAtoms == null ? null : atomsToOruDisplay(immatureAtoms),
+      oru_coinbase_total_display: coinbaseAtoms == null ? null : atomsToOruDisplay(coinbaseAtoms),
       oru_subsidy_tip_display:
-        formatOruAmount(runtimeSupply.oru_subsidy_block) ?? atomsToOruDisplay(String(eco.oru_subsidy_tip_atoms ?? "0")),
+        formatOruAmount(runtimeSupply.oru_subsidy_block) ??
+        (subsidySqlAtoms == null ? null : atomsToOruDisplay(subsidySqlAtoms)),
       oru_subsidy_schedule_display: oruSubsidyScheduleDisplay,
       accounting: {
-        indexer_height: indexerHeight >= 0 ? indexerHeight : null,
+        indexer_height: economic ? (economic.indexerHeight >= 0 ? economic.indexerHeight : null) : null,
         node_height: nodeHeight >= 0 ? nodeHeight : null,
         issued_source: "node getruntimesupply at node height",
         circulating_source: "indexer UTXO set at indexer height; mature only",
-        oru_supply_consistent: oruSupplyAccounting.consistent,
-        oru_supply_errors: oruSupplyAccounting.errors,
+        oru_supply_consistent: economic ? economic.oruSupplyConsistent : null,
+        oru_supply_errors: economic ? economic.oruSupplyErrors : null,
       },
       oru_supply_cumulative_display: formatOruAmount(runtimeSupply.oru_supply_cumulative),
       oru_supply_parent_display: formatOruAmount(runtimeSupply.oru_supply_parent),
       oru_burn_block_display: formatOruAmount(runtimeSupply.oru_converge_burn_block),
-      convergence_event_count: eco.convergence_event_count ?? 0,
-      convergence_burn_count: eco.convergence_eligible_count ?? 0,
-      res_mint_rate_last_100_blocks_display: atomsToResDisplay(String(eco.res_mint_last_100_atoms ?? "0")),
-      res_mint_count: eco.res_mint_count ?? 0,
-      last_res_height: convStatus.last_res_height ?? eco.last_res_mint_height ?? null,
-      last_res_mint_txid: eco.last_res_mint_txid ?? null,
-      oru_indexed_utxo_total_atoms: String(eco.oru_utxo_atoms ?? "0"),
+      convergence_event_count: ecoCount(economic, "convergence_event_count"),
+      convergence_burn_count: ecoCount(economic, "convergence_eligible_count"),
+      res_mint_rate_last_100_blocks_display: mintedLast100 == null ? null : atomsToResDisplay(mintedLast100),
+      res_mint_count: ecoCount(economic, "res_mint_count"),
+      last_res_height: convStatus.last_res_height ?? (economic ? eco.last_res_mint_height ?? null : null),
+      last_res_mint_txid: economic ? eco.last_res_mint_txid ?? null : null,
+      oru_indexed_utxo_total_atoms: utxoAtoms,
       oru_cumulative_convergence_rpc: blockchainInfo.cumulative_convergence ?? null,
-      res_minted_total_atoms: String(eco.res_mint_total_atoms ?? "0"),
-      res_minted_total_display: atomsToResDisplay(String(eco.res_mint_total_atoms ?? "0")),
-      res_mint_rate_last_100_blocks_atoms: String(eco.res_mint_last_100_atoms ?? "0"),
+      res_minted_total_atoms: mintedAtoms,
+      res_minted_total_display: mintedAtoms == null ? null : atomsToResDisplay(mintedAtoms),
+      res_mint_rate_last_100_blocks_atoms: mintedLast100,
     },
     mining_activity: {
-      mempool_tx_count: mempoolTxids.length,
+      mempool_tx_count: live ? live.mempoolTxids.length : null,
       connections: networkInfo.connections ?? null,
       active_miners: null,
       pending_blocks_active_jobs: null,
@@ -470,23 +662,35 @@ export async function buildStatusDashboard(config: Config, pool: Pool): Promise<
     },
     system_integrity: {
       rpc_authority: "rigord: authoritative",
-      rpc_error: rpcError,
+      rpc_error: live?.rpcError ?? null,
       indexer_sync_lag_blocks: indexerLagBlocks,
       indexer_sync_lag_seconds: indexerLagSeconds,
       indexer_last_updated_at:
-        chainState.updated_at instanceof Date
+        chainState?.updated_at instanceof Date
           ? chainState.updated_at.toISOString()
-          : chainState.updated_at,
-      wallet_observer: walletObserver,
+          : chainState?.updated_at ?? null,
+      wallet_observer: live?.walletObserver ?? null,
       explorer_compliance: {
         frozen: true,
         equivalence_claimed: EQUIVALENCE_CLAIMED,
-        mismatch_active: compliance.mismatch_active,
-        mismatches: compliance.mismatches,
-        mismatch_messages: compliance.mismatch_messages,
-        rpc_degraded: compliance.rpc_degraded,
-        rpc_messages: compliance.rpc_messages,
+        mismatch_active: compliance?.mismatch_active ?? null,
+        mismatches: compliance?.mismatches ?? null,
+        mismatch_messages: compliance?.mismatch_messages ?? null,
+        rpc_degraded: compliance?.rpc_degraded ?? null,
+        rpc_messages: compliance?.rpc_messages ?? null,
       },
     },
   };
+}
+
+export async function buildStatusDashboard(config: Config, pool: Pool): Promise<StatusDashboard> {
+  const [live, economic] = await Promise.all([
+    loadLiveStatus(config, pool),
+    loadEconomicAggregates(config, pool),
+  ]);
+  return assembleStatusDashboard(
+    live,
+    economic,
+    freshStatusCache(economic.indexerHeight >= 0 ? economic.indexerHeight : null),
+  );
 }

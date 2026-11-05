@@ -46,12 +46,13 @@
         <td class="${row.asset_type === "RES" ? "address-tag-res" : "address-tag-oru"}">${escapeHtml(row.asset_type)}</td>
         <td>${escapeHtml(row.received_amount ?? "0")}</td>
         <td>${escapeHtml(row.sent_amount ?? "0")}</td>
+        <td>${row.asset_type === "RES" ? (row.counterparty_address ? `<a href="${escapeHtml(routes.addressPath(row.counterparty_address))}">${escapeHtml(row.counterparty_address)}</a>` : escapeHtml(row.counterparty_label || "Unavailable")) : "—"}</td>
         <td>${row.timestamp ? new Date(row.timestamp * 1000).toISOString() : "—"}</td>
       </tr>`,
       )
       .join("");
     return `<div class="address-table-wrap"><table class="address-table">
-      <thead><tr><th>txid</th><th>height</th><th>conf</th><th>asset</th><th>received</th><th>sent</th><th>time</th></tr></thead>
+      <thead><tr><th>txid</th><th>height</th><th>conf</th><th>asset</th><th>received</th><th>sent</th><th>counterparty</th><th>time</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
   }

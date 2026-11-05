@@ -1,6 +1,8 @@
 /**
  * Persist RFC-018 explorer fee-burn rows. Reorg uses DELETE FROM blocks
- * (CASCADE). Remaining prefix cumulative_burned_oru stays correct.
+ * (CASCADE). The cumulative column is the sum of canonical per-block burns,
+ * not a copy of the previous height. A missing parent height must not
+ * restart that sum at zero. Readers also recompute the sum from burned_oru.
  */
 
 import type { Pool, PoolClient } from "pg";
@@ -18,16 +20,14 @@ export async function upsertRfc018FeeBurnStats(
   blockHash: string,
   burnedOru: bigint,
 ): Promise<{ burned_oru: bigint; cumulative_burned_oru: bigint }> {
-  let parentCum = 0n;
-  if (height > 0n) {
-    const parent = await pool.query<{ cumulative_burned_oru: string }>(
-      `SELECT cumulative_burned_oru::text AS cumulative_burned_oru
-       FROM rfc018_fee_burn_stats WHERE height = $1`,
-      [height - 1n],
-    );
-    if (parent.rows[0]) parentCum = BigInt(parent.rows[0].cumulative_burned_oru);
-  }
-  const cumulative = nextCumulativeBurn(parentCum, burnedOru);
+  const prior = await pool.query<{ cum: string }>(
+    `SELECT COALESCE(SUM(s.burned_oru), 0)::text AS cum
+     FROM rfc018_fee_burn_stats s
+     JOIN blocks b ON b.height = s.height AND b.block_hash = s.block_hash
+     WHERE s.height < $1`,
+    [height],
+  );
+  const cumulative = nextCumulativeBurn(BigInt(prior.rows[0]?.cum ?? "0"), burnedOru);
   await pool.query(
     `
       INSERT INTO rfc018_fee_burn_stats(height, block_hash, burned_oru, cumulative_burned_oru)
@@ -45,14 +45,33 @@ export async function upsertRfc018FeeBurnStats(
 export async function getRfc018FeeBurnAtHeight(
   pool: Pool,
   height: bigint | number | string,
-): Promise<{ burned_oru: bigint; cumulative_burned_oru: bigint; block_hash: string } | null> {
-  const res = await pool.query<{ burned_oru: string; cumulative_burned_oru: string; block_hash: string }>(
+): Promise<{ burned_oru: bigint; cumulative_burned_oru: bigint | null; block_hash: string } | null> {
+  const res = await pool.query<{ burned_oru: string; cumulative_burned_oru: string | null; block_hash: string }>(
     `
-      SELECT burned_oru::text AS burned_oru,
-             cumulative_burned_oru::text AS cumulative_burned_oru,
-             block_hash
-      FROM rfc018_fee_burn_stats
-      WHERE height = $1::bigint
+      SELECT s.burned_oru::text AS burned_oru,
+             s.block_hash,
+             CASE
+               WHEN EXISTS (
+                 SELECT 1
+                 FROM blocks b
+                 WHERE b.height <= $1::bigint
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM rfc018_fee_burn_stats x
+                     WHERE x.height = b.height
+                       AND x.block_hash = b.block_hash
+                   )
+               ) THEN NULL
+               ELSE (
+                 SELECT COALESCE(SUM(x.burned_oru), 0)::text
+                 FROM rfc018_fee_burn_stats x
+                 JOIN blocks b ON b.height = x.height AND b.block_hash = x.block_hash
+                 WHERE x.height <= $1::bigint
+               )
+             END AS cumulative_burned_oru
+      FROM rfc018_fee_burn_stats s
+      JOIN blocks b ON b.height = s.height AND b.block_hash = s.block_hash
+      WHERE s.height = $1::bigint
     `,
     [String(height)],
   );
@@ -60,21 +79,38 @@ export async function getRfc018FeeBurnAtHeight(
   if (!row) return null;
   return {
     burned_oru: BigInt(row.burned_oru),
-    cumulative_burned_oru: BigInt(row.cumulative_burned_oru),
+    cumulative_burned_oru: row.cumulative_burned_oru == null ? null : BigInt(row.cumulative_burned_oru),
     block_hash: row.block_hash,
   };
 }
 
 export async function getRfc018FeeBurnTip(
   pool: Pool,
-): Promise<{ burned_oru: bigint; cumulative_burned_oru: bigint; height: bigint } | null> {
-  const res = await pool.query<{ burned_oru: string; cumulative_burned_oru: string; height: string }>(
+): Promise<{ burned_oru: bigint; cumulative_burned_oru: bigint | null; height: bigint } | null> {
+  const res = await pool.query<{ burned_oru: string; cumulative_burned_oru: string | null; height: string }>(
     `
-      SELECT burned_oru::text AS burned_oru,
-             cumulative_burned_oru::text AS cumulative_burned_oru,
-             height::text AS height
-      FROM rfc018_fee_burn_stats
-      ORDER BY height DESC
+      SELECT s.burned_oru::text AS burned_oru,
+             s.height::text AS height,
+             CASE
+               WHEN EXISTS (
+                 SELECT 1
+                 FROM blocks b
+                 WHERE NOT EXISTS (
+                   SELECT 1
+                   FROM rfc018_fee_burn_stats x
+                   WHERE x.height = b.height
+                     AND x.block_hash = b.block_hash
+                 )
+               ) THEN NULL
+               ELSE (
+                 SELECT COALESCE(SUM(x.burned_oru), 0)::text
+                 FROM rfc018_fee_burn_stats x
+                 JOIN blocks b ON b.height = x.height AND b.block_hash = x.block_hash
+               )
+             END AS cumulative_burned_oru
+      FROM rfc018_fee_burn_stats s
+      JOIN blocks b ON b.height = s.height AND b.block_hash = s.block_hash
+      ORDER BY s.height DESC
       LIMIT 1
     `,
   );
@@ -82,7 +118,7 @@ export async function getRfc018FeeBurnTip(
   if (!row) return null;
   return {
     burned_oru: BigInt(row.burned_oru),
-    cumulative_burned_oru: BigInt(row.cumulative_burned_oru),
+    cumulative_burned_oru: row.cumulative_burned_oru == null ? null : BigInt(row.cumulative_burned_oru),
     height: BigInt(row.height),
   };
 }

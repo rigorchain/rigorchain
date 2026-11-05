@@ -15,6 +15,8 @@ import { rpc } from "./rpcCli";
 import { matureSpendableOruSql, unlockedOruSql } from "./circulating";
 import { atomsFromSql, reconcileIndexedAsset } from "./accounting";
 import { isConvergenceScriptPubKey } from "./script";
+import { addressResCounterparty } from "./resTransferHistory";
+import { RES_OUTPUT_SPENT_SQL } from "./resTransferQuery";
 import { CONVERGENCE_IS_MINT_SQL } from "./rfc020MintSql";
 
 export type AddressIntelligence = Record<string, unknown>;
@@ -45,10 +47,7 @@ export async function getAddressIntelligence(
   const resOutputs = await pool.query(
     `
       SELECT o.txid, o.vout_index, o.value_atoms, b.height, b.time,
-             EXISTS (
-               SELECT 1 FROM res_transfers rt
-               WHERE rt.res_input_txid = o.txid AND rt.res_input_vout_index = o.vout_index
-             ) AS spent
+             ${RES_OUTPUT_SPENT_SQL} AS spent
       FROM outputs o
       JOIN transactions t ON t.txid = o.txid
       JOIN blocks b ON b.block_hash = t.block_hash
@@ -79,10 +78,7 @@ export async function getAddressIntelligence(
     `
       WITH res_out AS (
         SELECT o.txid, o.vout_index, o.value_atoms,
-               EXISTS (
-                 SELECT 1 FROM res_transfers rt
-                 WHERE rt.res_input_txid = o.txid AND rt.res_input_vout_index = o.vout_index
-               ) AS spent
+               ${RES_OUTPUT_SPENT_SQL} AS spent
         FROM outputs o
         WHERE o.address = $1 AND o.asset_kind = 'RES'
       )
@@ -115,11 +111,12 @@ export async function getAddressIntelligence(
         JOIN transactions t ON t.txid = u.spending_txid
         WHERE u.address = $1 AND u.spending_txid IS NOT NULL
         UNION ALL
-        SELECT b.height
-        FROM res_transfers rt
-        JOIN outputs o ON o.txid = rt.res_input_txid AND o.vout_index = rt.res_input_vout_index
-        JOIN blocks b ON b.block_hash = rt.spend_block_hash
-        WHERE o.address = $1
+        SELECT t.block_height AS height
+        FROM inputs i
+        JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+        JOIN transactions t ON t.txid = i.txid
+        JOIN blocks b ON b.block_hash = t.block_hash
+        WHERE prev.address = $1 AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
       ) heights
     `,
     [addr],
@@ -137,10 +134,12 @@ export async function getAddressIntelligence(
         FROM oru_utxos u
         WHERE u.address = $1 AND u.spent = TRUE AND u.spending_txid IS NOT NULL
         UNION
-        SELECT rt.spend_txid AS txid
-        FROM res_transfers rt
-        JOIN outputs o ON o.txid = rt.res_input_txid AND o.vout_index = rt.res_input_vout_index
-        WHERE o.address = $1
+        SELECT i.txid
+        FROM inputs i
+        JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+        JOIN transactions t ON t.txid = i.txid
+        JOIN blocks b ON b.block_hash = t.block_hash
+        WHERE prev.address = $1 AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
       ) txids
     `,
     [addr],
@@ -155,9 +154,12 @@ export async function getAddressIntelligence(
           SELECT u.spending_txid FROM oru_utxos u
           WHERE u.address = $1 AND u.spent = TRUE AND u.spending_txid IS NOT NULL
           UNION
-          SELECT rt.spend_txid FROM res_transfers rt
-          JOIN outputs o ON o.txid = rt.res_input_txid AND o.vout_index = rt.res_input_vout_index
-          WHERE o.address = $1
+          SELECT i.txid
+          FROM inputs i
+          JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+          JOIN transactions st ON st.txid = i.txid
+          JOIN blocks sb ON sb.block_hash = st.block_hash
+          WHERE prev.address = $1 AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
         ) all_tx
       ),
       recv AS (
@@ -173,17 +175,48 @@ export async function getAddressIntelligence(
         GROUP BY u.spending_txid
       ),
       res_sent AS (
-        SELECT rt.spend_txid AS txid, SUM(rt.res_amount_atoms)::text AS sent_atoms
-        FROM res_transfers rt
-        JOIN outputs o ON o.txid = rt.res_input_txid AND o.vout_index = rt.res_input_vout_index
-        WHERE o.address = $1
-        GROUP BY rt.spend_txid
+        SELECT i.txid, SUM(prev.value_atoms)::text AS sent_atoms
+        FROM inputs i
+        JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+        JOIN transactions st ON st.txid = i.txid
+        JOIN blocks sb ON sb.block_hash = st.block_hash
+        WHERE prev.address = $1 AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
+        GROUP BY i.txid
       )
       SELECT t.txid, t.block_height, b.time,
              COALESCE(r_oru.received_atoms, '0') AS oru_received_atoms,
              COALESCE(r_res.received_atoms, '0') AS res_received_atoms,
              COALESCE(os.sent_atoms, '0') AS oru_sent_atoms,
-             COALESCE(rs.sent_atoms, '0') AS res_sent_atoms
+             COALESCE(rs.sent_atoms, '0') AS res_sent_atoms,
+             (
+               SELECT COUNT(DISTINCT prev.address) FILTER (WHERE prev.address IS NOT NULL)::int
+               FROM inputs i
+               JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+               WHERE i.txid = t.txid AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
+             ) AS res_sender_address_count,
+             (
+               SELECT BOOL_OR(prev.address IS NULL)
+               FROM inputs i
+               JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+               WHERE i.txid = t.txid AND prev.asset_kind = 'RES' AND prev.value_atoms > 0
+             ) AS res_sender_missing,
+             (
+               SELECT MIN(prev.address)
+               FROM inputs i
+               JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+               WHERE i.txid = t.txid AND prev.asset_kind = 'RES' AND prev.value_atoms > 0 AND prev.address IS NOT NULL
+             ) AS res_sender_address,
+             (
+               SELECT COUNT(DISTINCT o.address) FILTER (WHERE o.address IS NOT NULL AND o.address <> $1)::int
+               FROM outputs o
+               WHERE o.txid = t.txid AND o.asset_kind = 'RES' AND o.value_atoms > 0
+             ) AS res_other_recipient_count,
+             (
+               SELECT MIN(o.address)
+               FROM outputs o
+               WHERE o.txid = t.txid AND o.asset_kind = 'RES' AND o.value_atoms > 0
+                 AND o.address IS NOT NULL AND o.address <> $1
+             ) AS res_other_recipient
       FROM txids
       JOIN transactions t ON t.txid = txids.txid
       JOIN blocks b ON b.block_hash = t.block_hash
@@ -272,11 +305,30 @@ export async function getAddressIntelligence(
       });
     }
     if (BigInt(row.res_received_atoms) > 0n || BigInt(row.res_sent_atoms) > 0n) {
+      const counterparty = addressResCounterparty({
+        sentAtoms: BigInt(row.res_sent_atoms),
+        receivedAtoms: BigInt(row.res_received_atoms),
+        senderAddressCount: Number(row.res_sender_address_count ?? 0),
+        senderAddress: row.res_sender_address ?? null,
+        senderMissing: Boolean(row.res_sender_missing),
+        otherRecipientCount: Number(row.res_other_recipient_count ?? 0),
+        otherRecipient: row.res_other_recipient ?? null,
+      });
       items.push({
         ...base,
         asset_type: "RES",
         received_amount: atomsToResDisplay(row.res_received_atoms),
         sent_amount: atomsToResDisplay(row.res_sent_atoms),
+        counterparty_kind: counterparty.kind,
+        counterparty_address: counterparty.kind === "address" ? counterparty.address : null,
+        counterparty_label:
+          counterparty.kind === "address"
+            ? counterparty.address
+            : counterparty.kind === "multiple"
+              ? BigInt(row.res_sent_atoms) > 0n
+                ? "Multiple outputs"
+                : "Multiple inputs"
+              : "Unavailable",
       });
     }
     if (items.length === 0) {

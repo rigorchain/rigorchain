@@ -44,7 +44,7 @@
           document.getElementById('status-root').textContent = 'Failed: ' + String(e);
         });
       }
-      setInterval(() => StatusDashboard.load().catch(() => {}), 5000);
+      StatusDashboard.startAutoRefresh();
     </script>
     <script src="/compliance.js"></script>
   </body>

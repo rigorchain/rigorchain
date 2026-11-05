@@ -5,7 +5,7 @@ import { buildConvergeProofPanel } from "./convergeProofPanel";
 import { getLineageForBlock, getLineageForTxid } from "./lineageDb";
 import { buildTxWitnessPanel } from "./witnessPanel";
 import { computeTxFee, formatOruAtoms } from "./fee";
-import { classifyTxKind, convergeOutputNote, pickPrimaryOruOutput, txKindLabel, txKindNotice } from "./txSummary";
+import { classifyTxKind, convergeOutputNote, pickPrimaryOruOutput, presentBlockTx, txKindLabel, txKindNotice } from "./txSummary";
 import {
   CONVERGENCE_OUTPUT_STATE,
   OP_CONVERGE_SCRIPT_NAME,
@@ -182,9 +182,28 @@ export async function listBlocks(pool: Pool, limit: number, offset = 0): Promise
                  AND LOWER(REPLACE(TRIM(o.script_pubkey), ' ', '')) ~ '^14[0-9a-f]{40}bd$'
              ), '0') AS converge_burn_atoms,
              s.burned_oru::text AS rfc018_block_burned_oru,
-             s.cumulative_burned_oru::text AS rfc018_cumulative_burned_oru
+             CASE
+               WHEN s.height IS NULL THEN NULL
+               WHEN EXISTS (
+                 SELECT 1
+                 FROM blocks earlier
+                 WHERE earlier.height <= b.height
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM rfc018_fee_burn_stats x
+                     WHERE x.height = earlier.height
+                       AND x.block_hash = earlier.block_hash
+                   )
+               ) THEN NULL
+               ELSE (
+                 SELECT COALESCE(SUM(x.burned_oru), 0)::text
+                 FROM rfc018_fee_burn_stats x
+                 JOIN blocks earlier ON earlier.height = x.height AND earlier.block_hash = x.block_hash
+                 WHERE x.height <= b.height
+               )
+             END AS rfc018_cumulative_burned_oru
       FROM blocks b
-      LEFT JOIN rfc018_fee_burn_stats s ON s.height = b.height
+      LEFT JOIN rfc018_fee_burn_stats s ON s.height = b.height AND s.block_hash = b.block_hash
       ORDER BY b.height DESC
       LIMIT $1 OFFSET $2
     `,
@@ -194,9 +213,9 @@ export async function listBlocks(pool: Pool, limit: number, offset = 0): Promise
     const atoms = BigInt(row.oru_minted_atoms ?? "0");
     const resMintAtoms = BigInt(row.res_minted_atoms ?? "0");
     const convergeBurnAtoms = BigInt(row.converge_burn_atoms ?? "0");
-    const blockBurn = BigInt(row.rfc018_block_burned_oru ?? "0");
-    const cumBurn = BigInt(row.rfc018_cumulative_burned_oru ?? "0");
-    const indexed = row.rfc018_block_burned_oru != null;
+    const blockBurn = row.rfc018_block_burned_oru == null ? null : BigInt(row.rfc018_block_burned_oru);
+    const cumBurn = row.rfc018_cumulative_burned_oru == null ? null : BigInt(row.rfc018_cumulative_burned_oru);
+    const indexed = blockBurn != null && cumBurn != null;
     return {
       ...row,
       oru_minted: formatOruAtoms(atoms),
@@ -207,10 +226,19 @@ export async function listBlocks(pool: Pool, limit: number, offset = 0): Promise
       consensus_fingerprint_short: shortFingerprint(row.consensus_fingerprint),
       consensus_fingerprint_display: displayFingerprint(row.consensus_fingerprint),
       consensus_fingerprint_status: fingerprintStatus(row.consensus_fingerprint),
-      rfc018_fee_burn: {
-        ...rfc018FeeBurnView(blockBurn, cumBurn, atomsToOruDisplay),
-        indexed,
-      },
+      rfc018_fee_burn: indexed
+        ? {
+            ...rfc018FeeBurnView(blockBurn, cumBurn, atomsToOruDisplay),
+            indexed: true,
+          }
+        : {
+            block_burned_oru: blockBurn == null ? null : blockBurn.toString(),
+            cumulative_burned_oru: null,
+            block_burned_oru_display: blockBurn == null ? null : atomsToOruDisplay(blockBurn),
+            cumulative_burned_oru_display: null,
+            equivalence_claimed: false as const,
+            indexed: false,
+          },
     };
   });
 }
@@ -283,41 +311,36 @@ export async function getBlockByHash(pool: Pool, hash: string): Promise<any | nu
     [hash],
   );
   const mintTxids = new Set(mintRows.rows.map((r) => r.mint_txid));
+  const resInputRows = txs.rows.length
+    ? await pool.query<{ txid: string }>(
+        `
+          SELECT DISTINCT i.txid
+          FROM inputs i
+          JOIN outputs prev ON prev.txid = i.prev_txid AND prev.vout_index = i.prev_vout
+          JOIN transactions pt ON pt.txid = prev.txid
+          JOIN blocks pb ON pb.block_hash = pt.block_hash
+          WHERE i.txid = ANY($1::text[])
+            AND prev.asset_kind = 'RES'
+            AND prev.value_atoms > 0
+        `,
+        [txs.rows.map((t) => t.txid)],
+      )
+    : { rows: [] as Array<{ txid: string }> };
+  const resInputTxids = new Set(resInputRows.rows.map((row) => row.txid));
 
   const enrichedTxs = txs.rows.map((t) => {
     const outs = outsByTx.get(t.txid) ?? [];
-    const primary = pickPrimaryOruOutput(outs);
-    const hasRes = outs.some((o) => o.asset_kind === "RES");
-    const resAtoms = outs
-      .filter((o) => o.asset_kind === "RES")
-      .reduce((acc, o) => acc + BigInt(o.value_atoms), 0n);
-    const isResMint = mintTxids.has(t.txid);
-    const kind = classifyTxKind({
-      isCoinbase: Boolean(t.is_coinbase),
-      primaryRole: primary?.role ?? null,
-      hasOru: outs.some((o) => o.asset_kind === "ORU"),
-      hasRes,
-      isResMint,
-    });
-    const showRes = isResMint && resAtoms > 0n;
     return {
       txid: t.txid,
       wtxid: t.wtxid,
       block_tx_index: t.block_tx_index,
       is_coinbase: Boolean(t.is_coinbase),
-      tx_kind: kind,
-      tx_kind_label: txKindLabel(kind),
-      amount_atoms: showRes ? resAtoms.toString() : primary ? String(primary.output.value_atoms) : null,
-      amount_display: showRes
-        ? atomsToResDisplay(resAtoms)
-        : primary
-          ? formatOruAtoms(BigInt(primary.output.value_atoms))
-          : null,
-      amount_role: showRes ? "output" : primary?.role ?? null,
-      asset_kind: showRes ? "RES" : primary ? "ORU" : hasRes ? "RES" : null,
-      receiver: showRes
-        ? (outs.find((o) => o.asset_kind === "RES")?.address ?? null)
-        : primary?.output.address ?? null,
+      ...presentBlockTx({
+        isCoinbase: Boolean(t.is_coinbase),
+        isResMint: mintTxids.has(t.txid),
+        outputs: outs,
+        hasPositiveResInput: resInputTxids.has(t.txid),
+      }),
     };
   });
 
@@ -388,14 +411,21 @@ export async function getBlockByHash(pool: Pool, hash: string): Promise<any | nu
   } catch {
     feeBurnRow = null;
   }
-  const rfc018_fee_burn = {
-    ...rfc018FeeBurnView(
-      feeBurnRow?.burned_oru ?? 0n,
-      feeBurnRow?.cumulative_burned_oru ?? 0n,
-      atomsToOruDisplay,
-    ),
-    indexed: feeBurnRow != null,
-  };
+  const feeCumulative = feeBurnRow?.cumulative_burned_oru ?? null;
+  const rfc018_fee_burn =
+    feeBurnRow != null && feeCumulative != null
+      ? {
+          ...rfc018FeeBurnView(feeBurnRow.burned_oru, feeCumulative, atomsToOruDisplay),
+          indexed: true,
+        }
+      : {
+          block_burned_oru: feeBurnRow ? feeBurnRow.burned_oru.toString() : null,
+          cumulative_burned_oru: null,
+          block_burned_oru_display: feeBurnRow ? atomsToOruDisplay(feeBurnRow.burned_oru) : null,
+          cumulative_burned_oru_display: null,
+          equivalence_claimed: false as const,
+          indexed: false,
+        };
   const summary = {
     height: block.height,
     hash: block.block_hash,
@@ -576,27 +606,61 @@ export async function getTxByTxid(pool: Pool, txid: string): Promise<any | null>
   });
 
   const primary = pickPrimaryOruOutput(vout.rows);
+  const hasResInput = enrichedVin.some(
+    (v) => v.prev_asset_kind === "RES" && v.prev_value_atoms != null && BigInt(v.prev_value_atoms) > 0n,
+  );
+  const resSenderAddresses = [
+    ...new Set(
+      enrichedVin
+        .filter((v) => v.prev_asset_kind === "RES" && v.prev_address)
+        .map((v) => String(v.prev_address)),
+    ),
+  ];
+  const resSenderMissing = enrichedVin.some((v) => v.prev_asset_kind === "RES" && !v.prev_address);
   const firstSender = enrichedVin.find((v) => v.prev_address)?.prev_address ?? (isCoinbase ? "Coinbase" : null);
   const primaryAtoms = primary ? BigInt(primary.output.value_atoms) : 0n;
-  const hasResOut = vout.rows.some((o) => o.asset_kind === "RES");
+  const hasResOut = vout.rows.some((o) => o.asset_kind === "RES" && BigInt(o.value_atoms) > 0n);
   const tx_kind = classifyTxKind({
     isCoinbase,
     primaryRole: primary?.role ?? null,
     hasOru: vout.rows.some((o) => o.asset_kind === "ORU"),
     hasRes: hasResOut,
+    hasResInput,
     isResMint: resMint.rows.length > 0,
   });
+  const resRecipients = [
+    ...new Set(
+      vout.rows
+        .filter((o) => o.asset_kind === "RES" && BigInt(o.value_atoms) > 0n && o.address)
+        .map((o) => String(o.address)),
+    ),
+  ];
+  const resOutAtoms = vout.rows
+    .filter((o) => o.asset_kind === "RES")
+    .reduce((acc, o) => acc + BigInt(o.value_atoms), 0n);
+  const transferSender =
+    tx_kind === "res_transfer"
+      ? resSenderAddresses.length === 1 && !resSenderMissing
+        ? resSenderAddresses[0]
+        : resSenderAddresses.length > 1 || resSenderMissing
+          ? "Multiple inputs"
+          : "Unavailable"
+      : isCoinbase
+        ? "Coinbase"
+        : firstSender;
+  const transferReceiver = tx_kind === "res_transfer" ? (resRecipients.length === 1 ? resRecipients[0] : null) : primary?.output.address ?? null;
 
+  const resAmountDisplay = atomsToResDisplay(resOutAtoms);
   const summary = {
     txid,
     is_coinbase: isCoinbase,
-    sender: isCoinbase ? "Coinbase" : firstSender,
-    receiver: primary?.output.address ?? null,
-    amount_atoms: primary ? primaryAtoms.toString() : oruOut.toString(),
-    amount_display: formatOruAtoms(primary ? primaryAtoms : oruOut),
-    amount_role: primary?.role ?? null,
-    amount_total_atoms: oruOut.toString(),
-    amount_total_display: formatOruAtoms(oruOut),
+    sender: transferSender,
+    receiver: transferReceiver,
+    amount_atoms: tx_kind === "res_transfer" ? resOutAtoms.toString() : primary ? primaryAtoms.toString() : oruOut.toString(),
+    amount_display: tx_kind === "res_transfer" ? resAmountDisplay : formatOruAtoms(primary ? primaryAtoms : oruOut),
+    amount_role: tx_kind === "res_transfer" ? "output" : primary?.role ?? null,
+    amount_total_atoms: tx_kind === "res_transfer" ? resOutAtoms.toString() : oruOut.toString(),
+    amount_total_display: tx_kind === "res_transfer" ? resAmountDisplay : formatOruAtoms(oruOut),
     tx_kind,
     tx_kind_label: txKindLabel(tx_kind),
     minted_res: tx_kind === "res_mint",

@@ -16,6 +16,10 @@
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
       .res-history { margin-top: 16px; width: 100%; }
       .res-history h2 { font-size: 16px; margin: 0 0 8px; }
+      .history-wrap { overflow-x: auto; }
+      @media (max-width: 800px) {
+        body { margin: 12px; }
+      }
       .res-curve { width: 100%; height: 248px; display: block; margin: 8px 0; border: 1px solid #333; background: #0a0a0a; }
       .status-card .muted { margin: 0 0 8px; }
     </style>
@@ -31,8 +35,8 @@
       <a href="/address">Address</a>
       <a href="/search">Search</a>
     </nav>
-    <h1>Network RES</h1>
-    <p class="muted">ORU destroyed. RES minted. Destroy ORU to mint RES at the confirming-height protocol cost, not a market value.</p>
+    <h1>RES</h1>
+    <p class="muted">Confirmed RES transfers on RIGOR mainnet. Mint and destruction events remain on the <a href="/res-events.html">RES events</a> page.</p>
     <div id="curves" class="status-dashboard">Loading schedule…</div>
     <div id="root" class="status-dashboard">Loading…</div>
     <script>
@@ -51,10 +55,6 @@
       }
       function val(v) { return v == null || v === "" ? "—" : esc(v); }
       function isZeroHash(h) { return !h || /^0+$/.test(String(h)); }
-      function txLink(txid) {
-        if (isZeroHash(txid)) return "—";
-        return '<a class="mono" href="' + ExplorerRoutes.txPath(txid) + '">' + esc(txid) + "</a>";
-      }
       function txLinkShort(txid) {
         if (isZeroHash(txid)) return "—";
         const s = String(txid);
@@ -70,55 +70,54 @@
         }
       }
 
-      function renderDetails(eco, mints) {
-        const activity = card("RES activity", [
-          row("Network RES created", val(eco.network_res_minted_display)),
-          row("Confirming height", val(eco.confirm_height ?? eco.tip_height ?? eco.height)),
-          row("RES created (last 100 blocks)", val(eco.res_mint_rate_last_100_blocks_display)),
-          row("Creation count", val(eco.res_mint_count)),
-          row("Last RES height", val(eco.last_res_height)),
-          row("Last RES transaction", txLinkShort(eco.last_res_mint_txid)),
-        ]);
-        const rows = (mints || []).map((m) =>
-          "<tr><td>" + esc(m.block_height) + "</td><td>" +
-          txLink(m.mint_txid) + "</td><td>" +
-          esc(formatResAtoms(m.mint_amount)) + "</td></tr>"
-        ).join("");
+      function party(kind, address) {
+        if (kind === "multiple") return "Multiple inputs";
+        if (kind === "address" && address) {
+          return '<a class="mono" href="' + ExplorerRoutes.addressPath(address) + '">' + esc(address) + "</a>";
+        }
+        return "Unavailable";
+      }
+      function recipient(address) {
+        if (!address) return "Unavailable";
+        return '<a class="mono" href="' + ExplorerRoutes.addressPath(address) + '">' + esc(address) + "</a>";
+      }
+
+      function renderDetails(payload) {
+        const overview = payload.overview || {};
+        const transfers = payload.transfers || [];
+        const rows = transfers.map(function (item) {
+          const when = item.time == null ? "—" : new Date(item.time * 1000).toISOString().replace(".000Z", "Z");
+          return "<tr><td>" + esc(item.height) + "</td><td>" + txLinkShort(item.txid) + "</td><td>" +
+            party(item.sender_kind, item.sender_address) + "</td><td>" + recipient(item.recipient) + "</td><td>" +
+            esc(item.amount_display || formatResAtoms(item.amount_atoms)) + "</td><td>" + esc(when) + "</td></tr>";
+        }).join("");
+        const page = payload.page || 1;
+        const pages = payload.pages || 1;
+        const pager = '<p class="muted">Page ' + esc(page) + " / " + esc(pages) + " · " + esc(payload.total || 0) + " transfers" +
+          (payload.has_prev ? ' · <a href="/res.html?page=' + (page - 1) + '">Newer</a>' : "") +
+          (payload.has_next ? ' · <a href="/res.html?page=' + (page + 1) + '">Older</a>' : "") + "</p>";
         document.getElementById("root").innerHTML =
-          '<div class="status-grid status-grid--pair">' + activity + "</div>" +
-          '<div class="res-history"><h2>RES creation history</h2>' +
-          "<table><thead><tr><th>height</th><th>transaction</th><th>RES created</th></tr></thead><tbody>" +
-          (rows || '<tr><td colspan="3" class="muted">No RES creation on this chain yet.</td></tr>') +
-          "</tbody></table></div>";
+          card("RES overview", [
+            row("Asset", "RES"),
+            row("Network", val(overview.network)),
+            row("RES maximum supply", val(overview.max_supply_display)),
+            row("RES minted", val(overview.minted_display)),
+          ]) +
+          '<p class="muted">Mint and destruction events are on the <a href="/res-events.html">RES events</a> page.</p>' +
+          '<div class="res-history"><h2>RES Transfer History</h2>' + pager +
+          '<div class="history-wrap"><table><thead><tr><th>Height</th><th>Transaction</th><th>From</th><th>To</th><th>Amount</th><th>Time</th></tr></thead><tbody>' +
+          (rows || '<tr><td colspan="6" class="muted">No confirmed RES transfers on this chain yet.</td></tr>') +
+          "</tbody></table></div>" + pager + "</div>";
       }
 
       async function loadPage() {
         const rootEl = document.getElementById("root");
         if (rootEl && rootEl.getAttribute("data-ssr") === "1") return;
-
-        const [statusSettled, mintsSettled] = await Promise.allSettled([
-          ExplorerRoutes.fetchJson("/api/status", 15000).then(function (r) {
-            if (!r.ok) throw new Error("status HTTP " + r.status);
-            return r.json();
-          }),
-          ExplorerRoutes.fetchJson("/api/res/mints?limit=15", 10000).then(function (r) {
-            if (!r.ok) throw new Error("mints HTTP " + r.status);
-            return r.json();
-          }),
-        ]);
-
-        const eco =
-          statusSettled.status === "fulfilled"
-            ? (statusSettled.value.economic_snapshot || {})
-            : {};
-        const mints =
-          mintsSettled.status === "fulfilled"
-            ? (mintsSettled.value.mints || [])
-            : [];
-        if (statusSettled.status !== "fulfilled" && mintsSettled.status !== "fulfilled") {
-          throw statusSettled.reason || mintsSettled.reason || new Error("unavailable");
-        }
-        renderDetails(eco, mints);
+        const params = new URLSearchParams(window.location.search);
+        const page = params.get("page") || "1";
+        const response = await ExplorerRoutes.fetchJson("/api/res/transfers?limit=50&page=" + encodeURIComponent(page), 15000);
+        if (!response.ok) throw new Error("transfers HTTP " + response.status);
+        renderDetails(await response.json());
       }
       loadPage().catch((e) => {
         const root = document.getElementById("root");

@@ -1,12 +1,14 @@
 /**
  * RIGOR Explorer compliance layer.
  * Read-only display: footer and global mismatch banner.
+ * Polling pauses while the document is hidden.
  */
 (function () {
   "use strict";
 
   var POLL_MS = 30000;
   var pollTimer = null;
+  var started = false;
 
   function esc(s) {
     return String(s ?? "")
@@ -149,11 +151,62 @@
       });
   }
 
-  function start() {
-    refresh();
-    if (pollTimer) window.clearInterval(pollTimer);
+  function hidden() {
+    return document.visibilityState === "hidden";
+  }
+
+  function disarm() {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function arm() {
+    if (pollTimer || !started || hidden()) return;
     pollTimer = window.setInterval(refresh, POLL_MS);
   }
+
+  function onVisibility() {
+    if (!started) return;
+    if (hidden()) {
+      disarm();
+      return;
+    }
+    refresh();
+    arm();
+  }
+
+  function onPageHide() {
+    disarm();
+  }
+
+  function onPageShow(event) {
+    if (!started || hidden()) return;
+    if (event && event.persisted) refresh();
+    arm();
+  }
+
+  function start() {
+    if (started) return;
+    started = true;
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    refresh();
+    arm();
+  }
+
+  function stop() {
+    disarm();
+    if (!started) return;
+    started = false;
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("pagehide", onPageHide);
+    window.removeEventListener("pageshow", onPageShow);
+  }
+
+  window.CompliancePoll = { start: start, stop: stop, POLL_MS: POLL_MS };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
