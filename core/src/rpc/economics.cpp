@@ -48,6 +48,7 @@ static RPCHelpMan geteconomics()
                 {RPCResult::Type::STR, "res_destroyed", "RES removed from the UTXO set, or null"},
                 {RPCResult::Type::STR, "res_supply", "Current RES in the UTXO set, or null. Not res_generated."},
                 {RPCResult::Type::STR, "res_cap", "RFC-020 mint cap. Not the current supply."},
+                {RPCResult::Type::STR, "res_remaining", "RES maximum supply minus total RES minted, or null."},
                 {RPCResult::Type::STR, "historical_oru_per_res", "Mint-linked ORU per 1 RES, 8 decimal places, or null"},
                 {RPCResult::Type::STR, "next_block_destroy_cost", "Protocol ORU cost of 1 RES at the next height, or null. Not a market price."},
             }
@@ -82,6 +83,7 @@ static RPCHelpMan geteconomics()
     result.pushKV("res_destroyed", AmountOrNull(snap.amounts_authoritative && a.res_destroyed_available, a.res_destroyed));
     result.pushKV("res_supply", AmountOrNull(snap.amounts_authoritative && a.res_supply_available, a.res_supply));
     result.pushKV("res_cap", snap.amounts_authoritative ? ValueFromAmount(a.res_cap) : NullUniValue);
+    result.pushKV("res_remaining", AmountOrNull(snap.amounts_authoritative && a.res_remaining_available, a.res_remaining));
     result.pushKV("historical_oru_per_res", AmountOrNull(snap.amounts_authoritative && a.ratio_available, a.historical_oru_per_res));
     result.pushKV("next_block_destroy_cost", AmountOrNull(snap.amounts_authoritative && a.destroy_cost_available, a.destroy_cost));
     return result;

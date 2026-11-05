@@ -217,6 +217,9 @@ BOOST_AUTO_TEST_CASE(plain_mint_fee_and_res_supply_are_distinct)
     BOOST_CHECK_EQUAL(view.amounts.res_generated, minted);
     BOOST_CHECK_EQUAL(view.amounts.res_supply, minted - 2 * COIN);
     BOOST_CHECK(view.amounts.res_generated != view.amounts.res_supply);
+    BOOST_CHECK(view.amounts.res_remaining_available);
+    BOOST_CHECK_EQUAL(view.amounts.res_cap, Consensus::RES_MAX_SUPPLY);
+    BOOST_CHECK_EQUAL(view.amounts.res_remaining, Consensus::RES_MAX_SUPPLY - minted);
     BOOST_CHECK(view.amounts.total_destroyed_available);
     BOOST_CHECK(view.amounts.total_destroyed != view.amounts.convergence);
     BOOST_CHECK(view.amounts.oru_utxo_available);
@@ -302,6 +305,13 @@ BOOST_AUTO_TEST_CASE(subsidy_prefix_overflow_fails_closed)
     std::string error;
     const CBlock block = MakeBlock({MakeCoinbase({CTxOut(0, OruScript())})});
     BOOST_CHECK(!ApplyEconomicsBlock(block, 1, uint256S("bb"), uint256S("aa"), nullptr, &parent, summary, rows, error));
+}
+
+BOOST_AUTO_TEST_CASE(remaining_capacity_is_the_cap_minus_total_minted)
+{
+    const CAmount minted = 3372004992LL;
+    BOOST_CHECK_EQUAL(Consensus::RES_MAX_SUPPLY, 4194304LL * COIN);
+    BOOST_CHECK_EQUAL(Consensus::RES_MAX_SUPPLY - minted, 419427027995008LL);
 }
 
 BOOST_AUTO_TEST_CASE(ratio_is_unavailable_when_no_res_was_minted)
@@ -457,6 +467,31 @@ BOOST_AUTO_TEST_CASE(index_sync_matches_subsidy_schedule_and_reorg_deletes_the_o
     const auto replacement_summary = index.ReadSummary(replacement->GetBlockHash());
     BOOST_REQUIRE(replacement_summary);
     BOOST_CHECK_EQUAL(replacement_summary->prefix_subsidy, Consensus::ComputeDerivedOruSubsidyCumulative(replacement->nHeight, Params().GetConsensus()));
+    index.Stop();
+}
+
+BOOST_AUTO_TEST_CASE(refresh_follows_the_chain_tip_without_waiting_for_a_flush)
+{
+    EconomicsIndex index{interfaces::MakeChain(m_node), 1 << 20, true};
+    BOOST_REQUIRE(index.Start());
+    IndexWaitSynced(index);
+    const EconomicsSnapshot before = index.Query(true);
+    BOOST_REQUIRE(before.amounts_authoritative);
+    BOOST_CHECK(before.status == EconomicsStatus::Ok);
+
+    const CScript script = GetScriptForDestination(WitnessV0KeyHash(coinbaseKey.GetPubKey()));
+    CreateAndProcessBlock({}, script);
+    // The 300-second cache may still be young. A new tip must still be read.
+    const EconomicsSnapshot refreshed = index.Query(false);
+    BOOST_CHECK(refreshed.amounts_authoritative);
+    BOOST_CHECK(refreshed.status == EconomicsStatus::Ok);
+    BOOST_CHECK_EQUAL(refreshed.indexed_height, before.indexed_height + 1);
+    {
+        LOCK(cs_main);
+        BOOST_CHECK_EQUAL(refreshed.active_height, m_node.chainman->ActiveChain().Height());
+    }
+    BOOST_CHECK_EQUAL(refreshed.indexed_height, refreshed.active_height);
+    BOOST_CHECK(refreshed.indexed_hash != before.indexed_hash);
     index.Stop();
 }
 

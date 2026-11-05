@@ -181,12 +181,12 @@ DualityStatisticsPage::DualityStatisticsPage(QWidget* parent)
     m_res_grid->setContentsMargins(0, 0, 0, 0);
     m_res_grid->setHorizontalSpacing(space.sectionGap);
     m_res_grid->setVerticalSpacing(space.sectionGap);
-    m_res_cards[0] = makeCard(res_host, QStringLiteral("resCard0"), QStringLiteral("Historical RES Generated"),
-        QStringLiteral("Historical cumulative RES generation. Not the current supply."), QStringLiteral("RES"),
-        QStringLiteral("resGeneratedValue"), QStringLiteral("resGeneratedTitle"), &m_res_generated, colors.assetRes);
-    m_res_cards[1] = makeCard(res_host, QStringLiteral("resCard1"), QStringLiteral("Current RES UTXO Supply"),
-        QStringLiteral("Current RES amount represented by UTXOs. Not the historical total."), QStringLiteral("RES"),
+    m_res_cards[0] = makeCard(res_host, QStringLiteral("resCard0"), QStringLiteral("Current RES UTXO Supply"),
+        QStringLiteral("Current RES amount represented by UTXOs."), QStringLiteral("RES"),
         QStringLiteral("resSupplyValue"), QStringLiteral("resSupplyTitle"), &m_res_supply, colors.assetRes);
+    m_res_cards[1] = makeCard(res_host, QStringLiteral("resCard1"), QStringLiteral("Remaining RES Issuance Capacity"),
+        QStringLiteral("RES maximum supply minus total RES minted."), QStringLiteral("RES"),
+        QStringLiteral("resRemainingValue"), QStringLiteral("resRemainingTitle"), &m_res_remaining, colors.assetRes);
     layout->addWidget(res_host);
 
     QLabel* status_title = styledLabel(body, QStringLiteral("Index & Data Status"), type.uiBodyLargePx, true, colors.textPrimary, Qt::AlignLeft);
@@ -242,7 +242,7 @@ DualityStatisticsPage::DualityStatisticsPage(QWidget* parent)
                        "Convergence Burned counts positive OP_CONVERGE outputs, including the coinbase. It is not circulating supply.\n"
                        "Transaction Fee Burned is the RES-transfer fee burn. It is not Convergence, and it is hidden as N/A until every ancestor fee is known.\n"
                        "Current ORU UTXO Supply is ORU still in the UTXO set. It is not block rewards minus burned ORU.\n"
-                       "Historical RES Generated is not Current RES UTXO Supply."),
+                       "Remaining RES Issuance Capacity is the consensus RES maximum supply minus total RES minted."),
         type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop);
     notes->setObjectName(QStringLiteral("dualityNotes"));
     layout->addWidget(notes);
@@ -477,7 +477,7 @@ void DualityStatisticsPage::applySnapshot(const EconomicsSnapshot& snapshot)
     m_interval->setText(intervalValue());
 
     if (!show_amounts) {
-        for (QLabel* label : {m_oru_schedule, m_oru_convergence, m_oru_fee, m_oru_utxo, m_res_generated, m_res_supply}) {
+        for (QLabel* label : {m_oru_schedule, m_oru_convergence, m_oru_fee, m_oru_utxo, m_res_supply, m_res_remaining}) {
             label->setText(kNA);
         }
         return;
@@ -488,6 +488,6 @@ void DualityStatisticsPage::applySnapshot(const EconomicsSnapshot& snapshot)
     setAmount(m_oru_convergence, amounts.convergence_available, amountText(ASSET_ORU, amounts.convergence));
     setAmount(m_oru_fee, amounts.fee_burn_available, amountText(ASSET_ORU, amounts.fee_burn));
     setAmount(m_oru_utxo, amounts.oru_utxo_available, amountText(ASSET_ORU, amounts.oru_utxo));
-    setAmount(m_res_generated, amounts.res_generated_available, amountText(ASSET_RES, amounts.res_generated));
     setAmount(m_res_supply, amounts.res_supply_available, amountText(ASSET_RES, amounts.res_supply));
+    setAmount(m_res_remaining, amounts.res_remaining_available, amountText(ASSET_RES, amounts.res_remaining));
 }

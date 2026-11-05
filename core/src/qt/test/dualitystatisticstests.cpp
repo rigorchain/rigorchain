@@ -5,6 +5,7 @@
 #include <qt/test/dualitystatisticstests.h>
 
 #include <consensus/amount.h>
+#include <consensus/rigor_consensus_lock.h>
 #include <index/economics_snapshot.h>
 #include <qt/bitcoinunits.h>
 #include <qt/dualitystatisticspage.h>
@@ -47,6 +48,9 @@ EconomicsSnapshot authoritativeSample()
     snapshot.amounts.res_generated = 5 * COIN;
     snapshot.amounts.res_supply_available = true;
     snapshot.amounts.res_supply = 2 * COIN;
+    snapshot.amounts.res_cap = Consensus::RES_MAX_SUPPLY;
+    snapshot.amounts.res_remaining_available = true;
+    snapshot.amounts.res_remaining = Consensus::RES_MAX_SUPPLY - snapshot.amounts.res_generated;
     return snapshot;
 }
 
@@ -82,20 +86,20 @@ void DualityStatisticsTests::disabledIndexDoesNotShowZero()
 {
     DualityStatisticsPage page;
     page.show();
-    QLabel* generated = label(page, "resGeneratedValue");
+    QLabel* remaining = label(page, "resRemainingValue");
     QLabel* supply = label(page, "resSupplyValue");
     QLabel* schedule = label(page, "oruScheduleValue");
     QLabel* fee = label(page, "oruFeeValue");
     QLabel* utxo = label(page, "oruUtxoValue");
     QLabel* convergence = label(page, "oruConvergenceValue");
-    QVERIFY(generated != nullptr);
+    QVERIFY(remaining != nullptr);
     QVERIFY(supply != nullptr);
     QVERIFY(schedule != nullptr);
     QVERIFY(fee != nullptr);
     QVERIFY(utxo != nullptr);
     QVERIFY(convergence != nullptr);
     QVERIFY(QTest::qWaitFor([&] {
-        return generated->text() == QStringLiteral("N/A") && supply->text() == QStringLiteral("N/A");
+        return remaining->text() == QStringLiteral("N/A") && supply->text() == QStringLiteral("N/A");
     }, 2000));
     QCOMPARE(schedule->text(), QStringLiteral("N/A"));
     QCOMPARE(fee->text(), QStringLiteral("N/A"));
@@ -103,7 +107,7 @@ void DualityStatisticsTests::disabledIndexDoesNotShowZero()
     QCOMPARE(convergence->text(), QStringLiteral("N/A"));
     QVERIFY(!schedule->text().contains(QStringLiteral("0.00000000")));
     QVERIFY(!supply->text().contains(QStringLiteral("0.00000000")));
-    QVERIFY(supply->objectName() != generated->objectName());
+    QVERIFY(supply->objectName() != remaining->objectName());
     page.hide();
 }
 
@@ -115,15 +119,17 @@ void DualityStatisticsTests::snapshotValuesAndStaleRetention()
 
     const QString schedule = BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.subsidy, BitcoinUnits::Unit::ORU);
     const QString burned = BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.convergence, BitcoinUnits::Unit::ORU);
-    const QString generated = BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_generated, BitcoinUnits::Unit::ORU);
+    const QString remaining = BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_remaining, BitcoinUnits::Unit::ORU);
     const QString supply = BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_supply, BitcoinUnits::Unit::ORU);
     QCOMPARE(label(page, "oruScheduleValue")->text(), schedule);
     QCOMPARE(label(page, "oruConvergenceValue")->text(), burned);
     QCOMPARE(label(page, "oruFeeValue")->text(), QStringLiteral("N/A"));
     QCOMPARE(label(page, "oruUtxoValue")->text(), QStringLiteral("N/A"));
-    QCOMPARE(label(page, "resGeneratedValue")->text(), generated);
     QCOMPARE(label(page, "resSupplyValue")->text(), supply);
-    QVERIFY(generated != supply);
+    QCOMPARE(label(page, "resRemainingValue")->text(), remaining);
+    QCOMPARE(label(page, "resSupplyTitle")->text(), QStringLiteral("Current RES UTXO Supply"));
+    QCOMPARE(label(page, "resRemainingTitle")->text(), QStringLiteral("Remaining RES Issuance Capacity"));
+    QVERIFY(remaining != supply);
     QVERIFY(!label(page, "oruFeeValue")->text().contains(QStringLiteral("0")));
     QCOMPARE(label(page, "dualityIndexState")->text(), QStringLiteral("Synced"));
     QCOMPARE(label(page, "dualityFreshness")->text(), QStringLiteral("Current"));
@@ -144,7 +150,7 @@ void DualityStatisticsTests::snapshotValuesAndStaleRetention()
     page.applySnapshot(failed);
     QCOMPARE(label(page, "oruScheduleValue")->text(), schedule);
     QCOMPARE(label(page, "oruConvergenceValue")->text(), burned);
-    QCOMPARE(label(page, "resGeneratedValue")->text(), generated);
+    QCOMPARE(label(page, "resRemainingValue")->text(), remaining);
     QCOMPARE(label(page, "resSupplyValue")->text(), supply);
     QCOMPARE(label(page, "oruFeeValue")->text(), QStringLiteral("N/A"));
     QCOMPARE(label(page, "dualityFreshness")->text(), QStringLiteral("Stale Data"));
@@ -164,7 +170,7 @@ void DualityStatisticsTests::snapshotValuesAndStaleRetention()
     off_chain.status = EconomicsStatus::Stale;
     page.applySnapshot(off_chain);
     QCOMPARE(label(page, "oruScheduleValue")->text(), QStringLiteral("N/A"));
-    QCOMPARE(label(page, "resGeneratedValue")->text(), QStringLiteral("N/A"));
+    QCOMPARE(label(page, "resRemainingValue")->text(), QStringLiteral("N/A"));
     QCOMPARE(label(page, "resSupplyValue")->text(), QStringLiteral("N/A"));
     QCOMPARE(label(page, "dualityFreshness")->text(), QStringLiteral("Stale Data"));
     QVERIFY(!label(page, "oruScheduleValue")->text().contains(QStringLiteral("0.00000000")));
@@ -290,7 +296,7 @@ void DualityStatisticsTests::chineseCatalogsTranslateTheNewLabels()
         "Duality Statistics",
         "Block Rewards Issued",
         "Current RES UTXO Supply",
-        "Historical RES Generated",
+        "Remaining RES Issuance Capacity",
         "Unavailable",
         "N/A",
         "Stale Data",
@@ -314,10 +320,10 @@ void DualityStatisticsTests::chineseCatalogsTranslateTheNewLabels()
         QCOMPARE(label(page, "oruConvergenceTitle")->text(), QStringLiteral("Convergence Burned"));
         QCOMPARE(label(page, "oruFeeTitle")->text(), QStringLiteral("Transaction Fee Burned"));
         QCOMPARE(label(page, "oruUtxoTitle")->text(), QStringLiteral("Current ORU UTXO Supply"));
-        QCOMPARE(label(page, "resGeneratedTitle")->text(), QStringLiteral("Historical RES Generated"));
         QCOMPARE(label(page, "resSupplyTitle")->text(), QStringLiteral("Current RES UTXO Supply"));
+        QCOMPARE(label(page, "resRemainingTitle")->text(), QStringLiteral("Remaining RES Issuance Capacity"));
         QCOMPARE(label(page, "oruScheduleValue")->text(), QStringLiteral("N/A"));
-        QVERIFY(label(page, "dualityNotes")->text().contains(QStringLiteral("Historical RES Generated is not Current RES UTXO Supply.")));
+        QVERIFY(label(page, "dualityNotes")->text().contains(QStringLiteral("Remaining RES Issuance Capacity is the consensus RES maximum supply minus total RES minted.")));
         QApplication::instance()->removeTranslator(&translator);
     }
     for (const char* lang : traditional_langs) {

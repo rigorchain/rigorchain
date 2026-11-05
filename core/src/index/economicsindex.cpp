@@ -272,22 +272,41 @@ EconomicsSnapshot EconomicsIndex::Query(bool manual)
         return snap;
     }
     const bool initial_download = m_chainstate->IsInitialBlockDownload();
-    const bool synced = GetSummary().synced;
+    bool synced = GetSummary().synced;
+    // BlockConnected already records each new block. The on-disk meta pointer
+    // moves only when the chainstate is fully flushed, which is not the
+    // 300-second refresh. Drain queued blocks, then read the in-memory tip.
+    if (synced) {
+        BlockUntilSyncedToCurrentChain();
+    }
+    uint256 live_hash;
+    int live_height{-1};
+    bool have_live{false};
+    if (synced) {
+        LOCK(m_tip_mutex);
+        if (m_have_tip && m_tip_height >= 0 && !m_tip_hash.IsNull()) {
+            live_hash = m_tip_hash;
+            live_height = m_tip_height;
+            have_live = true;
+        }
+    }
     EconomicsMeta meta;
     const bool has_meta = m_db->Read(DBMetaKey{}, meta) && meta.schema == EconomicsBlockSummary::SCHEMA && meta.best_height >= 0 && !meta.best_hash.IsNull();
+    const bool has_serve = have_live || has_meta;
+    const uint256 serve_hash = have_live ? live_hash : (has_meta ? meta.best_hash : uint256{});
+    const int serve_height = have_live ? live_height : (has_meta ? meta.best_height : GetSummary().best_block_height);
     bool on_chain = false;
-    if (has_meta) {
+    {
         LOCK(cs_main);
         snap.active_height = m_chainstate->m_chain.Height();
-        const CBlockIndex* indexed = m_chainstate->m_blockman.LookupBlockIndex(meta.best_hash);
-        on_chain = indexed != nullptr && m_chainstate->m_chain.Contains(indexed);
-    } else {
-        LOCK(cs_main);
-        snap.active_height = m_chainstate->m_chain.Height();
+        if (has_serve && !serve_hash.IsNull()) {
+            const CBlockIndex* indexed = m_chainstate->m_blockman.LookupBlockIndex(serve_hash);
+            on_chain = indexed != nullptr && m_chainstate->m_chain.Contains(indexed);
+        }
     }
-    snap.indexed_height = has_meta ? meta.best_height : GetSummary().best_block_height;
-    snap.index_state = has_meta ? StateName(meta.state) : "empty";
-    const EconomicsServe decision = DecideEconomicsServe(true, initial_download, synced, has_meta, on_chain);
+    snap.indexed_height = serve_height;
+    snap.index_state = has_meta ? StateName(meta.state) : (have_live ? "synced" : "empty");
+    const EconomicsServe decision = DecideEconomicsServe(true, initial_download, synced, has_serve, on_chain);
     if (decision != EconomicsServe::Serve) {
         switch (decision) {
         case EconomicsServe::InitialBlockDownload: snap.status = EconomicsStatus::InitialBlockDownload; break;
@@ -300,7 +319,7 @@ EconomicsSnapshot EconomicsIndex::Query(bool manual)
     }
 
     const int64_t wall = GetTime();
-    const uint256 committed = meta.best_hash;
+    const uint256 committed = serve_hash;
     return m_cache.Request(manual, std::chrono::steady_clock::now(), committed, true, [&]() -> std::optional<EconomicsSnapshot> {
         const auto summary = ReadSummary(committed);
         if (!summary) return std::nullopt;

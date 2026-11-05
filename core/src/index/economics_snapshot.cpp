@@ -68,6 +68,10 @@ EconomicsSnapshot BuildEconomicsSnapshot(const EconomicsBlockSummary& summary, i
     snap.amounts.res_generated_available = true;
     snap.amounts.res_generated = summary.prefix_res_generated;
     snap.amounts.res_cap = Consensus::RES_MAX_SUPPLY;
+    if (snap.amounts.res_generated >= 0 && snap.amounts.res_generated <= snap.amounts.res_cap) {
+        snap.amounts.res_remaining_available = true;
+        snap.amounts.res_remaining = snap.amounts.res_cap - snap.amounts.res_generated;
+    }
 
     if (summary.fee_history_known) {
         snap.amounts.fee_burn_available = true;

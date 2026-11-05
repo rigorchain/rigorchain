@@ -14,7 +14,7 @@
 #include <optional>
 #include <string>
 
-/** Wallet and RPC refresh interval. A snapshot younger than this is reused. */
+/** Wallet and RPC refresh interval. The same indexed block is reused while it is younger than this. The next refresh reads the index tip, including blocks that arrived during the interval. */
 inline constexpr std::chrono::seconds ECONOMICS_REFRESH_INTERVAL{300};
 
 enum class EconomicsStatus {
@@ -65,6 +65,8 @@ struct EconomicsAmounts {
     CAmount res_destroyed{0};
     bool res_supply_available{false};
     CAmount res_supply{0};
+    bool res_remaining_available{false};
+    CAmount res_remaining{0};
     bool ratio_available{false};
     CAmount historical_oru_per_res{0};
     bool destroy_cost_available{false};

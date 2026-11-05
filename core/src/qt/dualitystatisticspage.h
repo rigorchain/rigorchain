@@ -67,8 +67,8 @@ private:
     QLabel* m_oru_convergence{nullptr};
     QLabel* m_oru_fee{nullptr};
     QLabel* m_oru_utxo{nullptr};
-    QLabel* m_res_generated{nullptr};
     QLabel* m_res_supply{nullptr};
+    QLabel* m_res_remaining{nullptr};
     std::thread m_worker;
     std::atomic<bool> m_inflight{false};
     std::atomic<bool> m_closing{false};
