@@ -67,10 +67,6 @@ SQLite is required for the wallet (descriptor SQLite only; Berkeley DB is not su
 
 To build Rigor Core without wallet, see [*Disable-wallet mode*](#disable-wallet-mode)
 
-Optional port mapping libraries (see: `--with-miniupnpc` and `--with-natpmp`):
-
-    sudo apt install libminiupnpc-dev libnatpmp-dev
-
 ZMQ dependencies (provides ZMQ API):
 
     sudo apt-get install libzmq3-dev
@@ -119,10 +115,6 @@ SQLite is required for the wallet (descriptor SQLite only; Berkeley DB is not su
 
 To build Rigor Core without wallet, see [*Disable-wallet mode*](#disable-wallet-mode)
 
-Optional port mapping libraries (see: `--with-miniupnpc` and `--with-natpmp`):
-
-    sudo dnf install miniupnpc-devel libnatpmp-devel
-
 ZMQ dependencies (provides ZMQ API):
 
     sudo dnf install zeromq-devel
@@ -157,19 +149,10 @@ Notes
 The release is built with GCC and then "strip rigord" to strip the debug
 symbols, which reduces the executable size by about 90%.
 
-miniupnpc
----------
+Automatic port mapping
+----------------------
 
-[miniupnpc](https://miniupnp.tuxfamily.org) may be used for UPnP port mapping.  It can be downloaded from [here](
-https://miniupnp.tuxfamily.org/files/).  UPnP support is compiled in and
-turned off by default.
-
-libnatpmp
----------
-
-[libnatpmp](https://miniupnp.tuxfamily.org/libnatpmp.html) may be used for NAT-PMP port mapping. It can be downloaded
-from [here](https://miniupnp.tuxfamily.org/files/). NAT-PMP support is compiled in and
-turned off by default.
+UPnP, NAT-PMP, and PCP are not part of this release. miniupnpc and libnatpmp are not required and are not linked. `--with-miniupnpc` and `--with-natpmp` are accepted and ignored. To accept inbound connections from outside the local network, forward the public P2P port on the router manually. The mainnet default is 8760. RPC and the Tor local target are not ports to forward.
 
 Security
 --------

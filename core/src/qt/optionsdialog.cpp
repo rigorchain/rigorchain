@@ -16,20 +16,32 @@
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 
+#include <chainparams.h>
 #include <interfaces/node.h>
+#include <net.h>
+#include <net_processing.h>
 #include <primitives/transaction.h>
 #include <validation.h> // for DEFAULT_SCRIPTCHECK_THREADS and MAX_SCRIPTCHECK_THREADS
 #include <netbase.h>
+#include <torcontrol.h>
 #include <txdb.h> // for -dbcache defaults
 #include <util/system.h>
 
 #include <chrono>
 
+#include <QApplication>
+#include <QClipboard>
+#include <QComboBox>
 #include <QDataWidgetMapper>
 #include <QDir>
+#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QIntValidator>
+#include <QLabel>
+#include <QLineEdit>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSystemTrayIcon>
 #include <QTimer>
 
@@ -52,13 +64,6 @@ OptionsDialog::OptionsDialog(QWidget* parent, bool enableWallet)
     connect(ui->prune, &QPushButton::toggled, ui->pruneSize, &QWidget::setEnabled);
 
     /* Network elements init */
-#ifndef USE_UPNP
-    ui->mapPortUpnp->setEnabled(false);
-#endif
-#ifndef USE_NATPMP
-    ui->mapPortNatpmp->setEnabled(false);
-#endif
-
     ui->proxyIp->setEnabled(false);
     ui->proxyPort->setEnabled(false);
     ui->proxyPort->setValidator(new QIntValidator(1, 65535, this));
@@ -175,6 +180,7 @@ OptionsDialog::OptionsDialog(QWidget* parent, bool enableWallet)
     // Checking the embeddedFont_radioButton automatically unchecks the systemFont_radioButton.
     ui->systemFont_radioButton->setChecked(true);
 
+    createTorGroup();
     GUIUtil::handleCloseWindowShortcut(this);
 }
 
@@ -186,6 +192,10 @@ OptionsDialog::~OptionsDialog()
 void OptionsDialog::setClientModel(ClientModel* client_model)
 {
     m_client_model = client_model;
+    if (m_tor_timer) {
+        m_tor_timer->start(2000);
+        refreshTorStatus();
+    }
 }
 
 void OptionsDialog::setModel(OptionsModel *_model)
@@ -212,6 +222,7 @@ void OptionsDialog::setModel(OptionsModel *_model)
         mapper->toFirst();
 
         updateDefaultProxyNets();
+        loadTorForm();
     }
 
     /* warn when one of the following settings changes by user action (placed here so init via mapper doesn't trigger them) */
@@ -263,8 +274,6 @@ void OptionsDialog::setMapper()
     mapper->addMapping(ui->m_enable_psbt_controls, OptionsModel::EnablePSBTControls);
 
     /* Network */
-    mapper->addMapping(ui->mapPortUpnp, OptionsModel::MapPortUPnP);
-    mapper->addMapping(ui->mapPortNatpmp, OptionsModel::MapPortNatpmp);
     mapper->addMapping(ui->allowIncoming, OptionsModel::Listen);
     mapper->addMapping(ui->enableServer, OptionsModel::Server);
 
@@ -352,6 +361,17 @@ void OptionsDialog::on_openBitcoinConfButton_clicked()
 void OptionsDialog::on_okButton_clicked()
 {
     mapper->submit();
+    if (model && m_tor_mode && m_tor_form_dirty) {
+        const auto selected = static_cast<TorNetworkMode>(m_tor_mode->currentData().toInt());
+        model->applyTorNetworkMode(selected,
+                                   m_tor_socks_host->text().trimmed(),
+                                   m_tor_socks_port->text().toInt(),
+                                   m_tor_control_host->text().trimmed(),
+                                   m_tor_control_port->text().toInt(),
+                                   m_tor_password->text());
+        m_tor_mode_at_open = selected;
+        m_tor_form_dirty = false;
+    }
     accept();
     updateDefaultProxyNets();
 }
@@ -452,4 +472,198 @@ QValidator::State ProxyAddressValidator::validate(QString &input, int &pos) cons
         return QValidator::Acceptable;
 
     return QValidator::Invalid;
+}
+
+static bool IsLoopbackHost(const QString& host)
+{
+    const QString normalized = host.trimmed().toLower();
+    return normalized == QLatin1String("127.0.0.1") ||
+           normalized == QLatin1String("::1") ||
+           normalized == QLatin1String("localhost");
+}
+
+static QLineEdit* TorEndpointEdit(QWidget* parent, const QString& text)
+{
+    auto* edit = new QLineEdit(text, parent);
+    edit->setClearButtonEnabled(true);
+    return edit;
+}
+
+void OptionsDialog::createTorGroup()
+{
+    auto* group = new QGroupBox(tr("Tor (independent daemon)"), ui->tabNetwork);
+    auto* layout = new QVBoxLayout(group);
+
+    auto* note = new QLabel(tr("Uses a Tor daemon you installed yourself. Checking only the SOCKS proxy above does not create an onion service: a default proxy turns listening off, and listening off turns the onion service off. Choose a mode here, then restart. The status below is the running node, not the unsaved form."), group);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+
+    auto* mode_row = new QHBoxLayout();
+    mode_row->addWidget(new QLabel(tr("Network mode:"), group));
+    m_tor_mode = new QComboBox(group);
+    m_tor_mode->addItem(tr("Normal network"), static_cast<int>(TorNetworkMode::Normal));
+    m_tor_mode->addItem(tr("Tor outbound"), static_cast<int>(TorNetworkMode::OutboundOnly));
+    m_tor_mode->addItem(tr("Tor inbound and outbound"), static_cast<int>(TorNetworkMode::InboundOutbound));
+    m_tor_mode->addItem(tr("Dual network (clearnet and Tor)"), static_cast<int>(TorNetworkMode::Dual));
+    m_tor_mode->addItem(tr("Tor only"), static_cast<int>(TorNetworkMode::TorOnly));
+    mode_row->addWidget(m_tor_mode, 1);
+    layout->addLayout(mode_row);
+
+    auto* socks_row = new QHBoxLayout();
+    socks_row->addWidget(new QLabel(tr("SOCKS5:"), group));
+    m_tor_socks_host = TorEndpointEdit(group, QStringLiteral("127.0.0.1"));
+    m_tor_socks_port = TorEndpointEdit(group, QStringLiteral("9050"));
+    m_tor_socks_port->setValidator(new QIntValidator(1, 65535, m_tor_socks_port));
+    m_tor_socks_port->setMaximumWidth(80);
+    socks_row->addWidget(m_tor_socks_host, 1);
+    socks_row->addWidget(m_tor_socks_port);
+    layout->addLayout(socks_row);
+
+    auto* control_row = new QHBoxLayout();
+    control_row->addWidget(new QLabel(tr("Control port:"), group));
+    m_tor_control_host = TorEndpointEdit(group, QStringLiteral("127.0.0.1"));
+    m_tor_control_port = TorEndpointEdit(group, QStringLiteral("9051"));
+    m_tor_control_port->setValidator(new QIntValidator(1, 65535, m_tor_control_port));
+    m_tor_control_port->setMaximumWidth(80);
+    control_row->addWidget(m_tor_control_host, 1);
+    control_row->addWidget(m_tor_control_port);
+    layout->addLayout(control_row);
+
+    auto* password_row = new QHBoxLayout();
+    password_row->addWidget(new QLabel(tr("Control password:"), group));
+    m_tor_password = new QLineEdit(group);
+    m_tor_password->setEchoMode(QLineEdit::Password);
+    m_tor_password->setPlaceholderText(tr("Empty uses cookie authentication"));
+    password_row->addWidget(m_tor_password, 1);
+    layout->addLayout(password_row);
+
+    m_tor_status = new QLabel(tr("Tor control is not connected. An onion service is not active."), group);
+    m_tor_status->setWordWrap(true);
+    layout->addWidget(m_tor_status);
+    m_onion_address = new QLabel(tr("Onion address: not active"), group);
+    m_onion_address->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_onion_address->setWordWrap(true);
+    layout->addWidget(m_onion_address);
+    m_onion_peers = new QLabel(tr("Onion peers: inbound 0, outbound 0"), group);
+    layout->addWidget(m_onion_peers);
+    m_tor_detail = new QLabel(group);
+    m_tor_detail->setWordWrap(true);
+    layout->addWidget(m_tor_detail);
+
+    m_copy_onion = new QPushButton(tr("Copy onion address"), group);
+    m_copy_onion->setEnabled(false);
+    layout->addWidget(m_copy_onion);
+
+    const int insert_at = ui->verticalLayout_Network->count() - 1;
+    ui->verticalLayout_Network->insertWidget(insert_at < 0 ? 0 : insert_at, group);
+
+    const auto mark_dirty = [this] {
+        if (m_tor_loading) return;
+        m_tor_form_dirty = true;
+        updateTorFormState();
+        showRestartWarning();
+    };
+    connect(m_tor_mode, qOverload<int>(&QComboBox::currentIndexChanged), this, mark_dirty);
+    connect(m_tor_socks_host, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_tor_socks_port, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_tor_control_host, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_tor_control_port, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_tor_password, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_copy_onion, &QPushButton::clicked, this, [this] {
+        if (!m_active_onion.isEmpty()) {
+            QApplication::clipboard()->setText(m_active_onion);
+        }
+    });
+
+    m_tor_timer = new QTimer(this);
+    connect(m_tor_timer, &QTimer::timeout, this, &OptionsDialog::refreshTorStatus);
+}
+
+void OptionsDialog::loadTorForm()
+{
+    if (!model || !m_tor_mode) return;
+    m_tor_loading = true;
+    const TorNetworkMode detected = model->detectedTorNetworkMode();
+    const int index = m_tor_mode->findData(static_cast<int>(detected));
+    if (index >= 0) m_tor_mode->setCurrentIndex(index);
+    m_tor_mode_at_open = detected;
+
+    const QString socks_host = model->getOption(OptionsModel::ProxyIP).toString();
+    const QString socks_port = model->getOption(OptionsModel::ProxyPort).toString();
+    if (!socks_host.isEmpty()) m_tor_socks_host->setText(socks_host);
+    if (!socks_port.isEmpty()) m_tor_socks_port->setText(socks_port);
+
+    const std::string control = gArgs.GetArg("-torcontrol", "127.0.0.1:9051");
+    QString control_host = QStringLiteral("127.0.0.1");
+    QString control_port = QStringLiteral("9051");
+    const int colon = QString::fromStdString(control).lastIndexOf(QLatin1Char(':'));
+    if (colon > 0) {
+        control_host = QString::fromStdString(control.substr(0, colon));
+        control_port = QString::fromStdString(control.substr(colon + 1));
+    }
+    m_tor_control_host->setText(control_host);
+    m_tor_control_port->setText(control_port);
+    m_tor_password->setText(QString::fromStdString(gArgs.GetArg("-torpassword", "")));
+    m_tor_form_dirty = false;
+    m_tor_loading = false;
+    refreshTorStatus();
+}
+
+void OptionsDialog::updateTorFormState()
+{
+    if (!m_tor_control_host) return;
+    const int control_port = m_tor_control_port->text().toInt();
+    const int socks_port = m_tor_socks_port->text().toInt();
+    const bool ports_ok = control_port >= 1 && control_port <= 65535 && socks_port >= 1 && socks_port <= 65535;
+    const bool control_ok = IsLoopbackHost(m_tor_control_host->text());
+    if (!ports_ok || !control_ok || m_tor_socks_host->text().trimmed().isEmpty()) {
+        setOkButtonState(false);
+        ui->statusLabel->setStyleSheet("QLabel { color: red; }");
+        ui->statusLabel->setText(tr("The Tor control endpoint must be a loopback address, and both ports must be between 1 and 65535."));
+        return;
+    }
+    updateProxyValidationState();
+}
+
+void OptionsDialog::refreshTorStatus()
+{
+    if (!m_tor_status) return;
+    const TorServiceStatus status = GetTorServiceStatus();
+    if (status.onion_service_active && !status.onion_address.empty()) {
+        m_tor_status->setText(tr("Onion service created. An inbound onion peer is shown in the peer counts, not by this line."));
+        const int port = Params().GetDefaultPort();
+        m_active_onion = QString::fromStdString(status.onion_address) + QStringLiteral(":") + QString::number(port);
+        m_onion_address->setText(tr("Onion address: %1").arg(m_active_onion));
+        m_copy_onion->setEnabled(true);
+    } else if (status.authenticated) {
+        m_tor_status->setText(tr("Tor control is authenticated. The onion service is not active."));
+        m_active_onion.clear();
+        m_onion_address->setText(tr("Onion address: not active"));
+        m_copy_onion->setEnabled(false);
+    } else if (status.control_connected) {
+        m_tor_status->setText(tr("Tor control is connected. Authentication is not complete, and the onion service is not active."));
+        m_active_onion.clear();
+        m_onion_address->setText(tr("Onion address: not active"));
+        m_copy_onion->setEnabled(false);
+    } else {
+        m_tor_status->setText(tr("Tor control is not connected. An onion service is not active."));
+        m_active_onion.clear();
+        m_onion_address->setText(tr("Onion address: not active"));
+        m_copy_onion->setEnabled(false);
+    }
+    m_tor_detail->setText(QString::fromStdString(status.detail));
+
+    int inbound = 0;
+    int outbound = 0;
+    if (model) {
+        interfaces::Node::NodesStats stats;
+        model->node().getNodesStats(stats);
+        for (const auto& row : stats) {
+            const CNodeStats& node_stats = std::get<0>(row);
+            if (node_stats.m_network != NET_ONION) continue;
+            if (node_stats.fInbound) ++inbound;
+            else ++outbound;
+        }
+    }
+    m_onion_peers->setText(tr("Onion peers: inbound %1, outbound %2").arg(inbound).arg(outbound));
 }

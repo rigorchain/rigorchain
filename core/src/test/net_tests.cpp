@@ -3,6 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <chainparams.h>
+#include <mapport.h>
 #include <clientversion.h>
 #include <compat/compat.h>
 #include <cstdint>
@@ -1145,6 +1146,26 @@ BOOST_AUTO_TEST_CASE(dns_seed_imports_bare_a_records_on_chain_port)
         BOOST_CHECK(!ContainsEndpoint(imported.addresses, long_term, 8760));
         BOOST_CHECK(!ContainsEndpoint(imported.addresses, temporary, 8760));
     }
+}
+
+BOOST_AUTO_TEST_CASE(automatic_port_mapping_disabled)
+{
+    BOOST_CHECK(!AutomaticPortMappingAvailable());
+    StartMapPort(true, true);
+    BOOST_CHECK(!MapPortThreadActive());
+    InterruptMapPort();
+    StopMapPort();
+    StartMapPort(false, false);
+    BOOST_CHECK(!MapPortThreadActive());
+
+    const uint16_t listen_port = GetListenPort();
+    StartMapPort(true, true);
+    BOOST_CHECK_EQUAL(GetListenPort(), listen_port);
+    BOOST_CHECK(listen_port != CreateBaseChainParams(CBaseChainParams::MAIN)->RPCPort());
+    BOOST_CHECK(listen_port != CreateBaseChainParams(CBaseChainParams::MAIN)->OnionServiceTargetPort());
+    BOOST_CHECK_EQUAL(CChainParams::Main()->GetDefaultPort(), 8760);
+    BOOST_CHECK_EQUAL(CreateBaseChainParams(CBaseChainParams::MAIN)->RPCPort(), 8761);
+    BOOST_CHECK_EQUAL(CreateBaseChainParams(CBaseChainParams::MAIN)->OnionServiceTargetPort(), 8762);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

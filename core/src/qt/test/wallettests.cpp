@@ -36,11 +36,15 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include <QEventLoop>
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QDir>
+#include <QTranslator>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QObject>
@@ -523,6 +527,41 @@ void TestGUIWatchOnly(interfaces::Node& node, TestChain100Setup& test)
     QVERIFY(DecodeRawPSBT(psbt, MakeByteSpan(*decoded_psbt), err));
 }
 
+const char* const kDisclaimerSource =
+    "The wallet constructs the mint with a future confirmation-height safety margin so waiting to confirm does not void it.\n"
+    "Destroyed ORU cannot be recovered.";
+
+class InstalledCatalogs
+{
+public:
+    InstalledCatalogs(const char* const* langs, int count) : ok(true)
+    {
+        for (int i = 0; i < count; ++i) {
+            auto translator = std::make_unique<QTranslator>();
+            if (!translator->load(QString::fromLatin1(langs[i]), QStringLiteral(":/translations/"))) {
+                ok = false;
+                failed = QString::fromLatin1(langs[i]);
+                break;
+            }
+            QApplication::installTranslator(translator.get());
+            installed.push_back(std::move(translator));
+        }
+    }
+    ~InstalledCatalogs()
+    {
+        while (!installed.empty()) {
+            QApplication::removeTranslator(installed.back().get());
+            installed.pop_back();
+        }
+    }
+    InstalledCatalogs(const InstalledCatalogs&) = delete;
+    InstalledCatalogs& operator=(const InstalledCatalogs&) = delete;
+
+    bool ok;
+    QString failed;
+    std::vector<std::unique_ptr<QTranslator>> installed;
+};
+
 void TestConvergenceClicks(interfaces::Node& node)
 {
     TestChain100Setup test;
@@ -650,6 +689,84 @@ void TestGUI(interfaces::Node& node)
 }
 
 } // namespace
+
+void WalletTests::convergenceDisclaimerTests()
+{
+    const QString simplified = QString::fromUtf8(
+        "钱包使用未来确认高度安全余量构造交易，避免因等待确认导致失效。\n"
+        "已销毁的 ORU 无法恢复。");
+    const QString traditional = QString::fromUtf8(
+        "錢包使用未來確認高度安全餘量構造交易，避免因等待確認導致失效。\n"
+        "已銷毀的 ORU 無法恢復。");
+    const QString english = QString::fromUtf8(kDisclaimerSource);
+
+    {
+        std::unique_ptr<const PlatformStyle> style(PlatformStyle::instantiate("other"));
+        ConvergencePage page(style.get());
+        auto* label = page.findChild<QLabel*>("labelConvergeDisclaimer");
+        QVERIFY(label != nullptr);
+        QVERIFY2(label->text() == english, qPrintable(label->text()));
+    }
+
+#define EXPECT_DISCLAIMER(langs, count, expected, absent) \
+    do { \
+        InstalledCatalogs catalogs_((langs), (count)); \
+        QVERIFY2(catalogs_.ok, qPrintable(catalogs_.failed)); \
+        std::unique_ptr<const PlatformStyle> style_(PlatformStyle::instantiate("other")); \
+        ConvergencePage page_(style_.get()); \
+        auto* label_ = page_.findChild<QLabel*>("labelConvergeDisclaimer"); \
+        QVERIFY(label_ != nullptr); \
+        QVERIFY2(label_->text() == (expected), qPrintable(label_->text())); \
+        QVERIFY2(!label_->text().contains((absent)), qPrintable(label_->text())); \
+    } while (0)
+
+    {
+        const char* langs[] = {"zh", "zh_CN"};
+        EXPECT_DISCLAIMER(langs, 2, simplified, QString::fromUtf8("已銷毀"));
+    }
+    {
+        const char* langs[] = {"zh-Hans"};
+        EXPECT_DISCLAIMER(langs, 1, simplified, QString::fromUtf8("已銷毀"));
+    }
+    {
+        const char* langs[] = {"zh", "zh_TW"};
+        EXPECT_DISCLAIMER(langs, 2, traditional, QString::fromUtf8("已销毁"));
+    }
+    {
+        const char* langs[] = {"zh-Hant"};
+        EXPECT_DISCLAIMER(langs, 1, traditional, QString::fromUtf8("已销毁"));
+    }
+    {
+        const char* langs[] = {"zh_HK"};
+        EXPECT_DISCLAIMER(langs, 1, traditional, QString::fromUtf8("已销毁"));
+    }
+    {
+        const char* langs[] = {"de"};
+        EXPECT_DISCLAIMER(langs, 1, english, QString::fromUtf8("无法恢复"));
+    }
+#undef EXPECT_DISCLAIMER
+
+    const QDir translations(QStringLiteral(":/translations"));
+    const QStringList packaged = translations.entryList(QDir::Files);
+    QVERIFY2(packaged.contains(QStringLiteral("en")), "English catalog is not packaged");
+    QVERIFY2(packaged.contains(QStringLiteral("zh_CN")), "zh_CN catalog is not packaged");
+    QVERIFY2(packaged.contains(QStringLiteral("zh_TW")), "zh_TW catalog is not packaged");
+    QVERIFY2(packaged.contains(QStringLiteral("zh-Hant")), "zh-Hant catalog is not packaged");
+    QVERIFY2(packaged.contains(QStringLiteral("zh_HK")), "zh_HK catalog is not packaged");
+    for (const QString& lang : packaged) {
+        if (lang == QLatin1String("zh") || lang == QLatin1String("zh_CN") || lang == QLatin1String("zh-Hans")
+            || lang == QLatin1String("zh_TW") || lang == QLatin1String("zh-Hant") || lang == QLatin1String("zh_HK")) {
+            continue;
+        }
+        QTranslator translator;
+        QVERIFY2(translator.load(lang, QStringLiteral(":/translations/")), qPrintable(lang));
+        QApplication::installTranslator(&translator);
+        const QString text = QCoreApplication::translate("ConvergencePage", kDisclaimerSource);
+        QApplication::removeTranslator(&translator);
+        QVERIFY2(!text.isEmpty(), qPrintable(lang));
+        QVERIFY2(text == english, qPrintable(lang + QStringLiteral(": ") + text));
+    }
+}
 
 void WalletTests::walletTests()
 {

@@ -175,15 +175,25 @@ AC_ARG_ENABLE([usdt],
 
 AC_ARG_WITH([miniupnpc],
   [AS_HELP_STRING([--with-miniupnpc],
-  [enable UPNP (default is no for security - CVE-2024-52917)])],
+  [ignored; UPnP support was removed (default is no)])],
   [use_upnp=$withval],
   [use_upnp=no])
 
+AS_IF([test "$use_upnp" != "no"], [
+  AC_MSG_WARN([UPnP support was removed. --with-miniupnpc is ignored and automatic port mapping stays disabled.])
+  use_upnp=no
+])
+
 AC_ARG_WITH([natpmp],
             [AS_HELP_STRING([--with-natpmp],
-                            [enable NAT-PMP (default is no for security)])],
+                            [ignored; NAT-PMP support was removed (default is no)])],
             [use_natpmp=$withval],
             [use_natpmp=no])
+
+AS_IF([test "$use_natpmp" != "no"], [
+  AC_MSG_WARN([NAT-PMP support was removed. --with-natpmp is ignored and automatic port mapping stays disabled.])
+  use_natpmp=no
+])
 
 AC_ARG_ENABLE(tests,
     AS_HELP_STRING([--disable-tests],[do not compile tests (default is to compile)]),
@@ -778,28 +788,7 @@ case $host in
 
          case $host in
            *aarch64*)
-             dnl The preferred Homebrew prefix for Apple Silicon is /opt/homebrew.
-             dnl Therefore, as we do not use pkg-config to detect miniupnpc and libnatpmp
-             dnl packages, we should set the CPPFLAGS and LDFLAGS variables for them
-             dnl explicitly.
-             if test "$use_upnp" != "no" && $BREW list --versions miniupnpc >/dev/null; then
-               miniupnpc_prefix=$($BREW --prefix miniupnpc 2>/dev/null)
-               if test "$suppress_external_warnings" != "no"; then
-                 MINIUPNPC_CPPFLAGS="-isystem $miniupnpc_prefix/include"
-               else
-                 MINIUPNPC_CPPFLAGS="-I$miniupnpc_prefix/include"
-               fi
-               MINIUPNPC_LIBS="-L$miniupnpc_prefix/lib"
-             fi
-             if test "$use_natpmp" != "no" && $BREW list --versions libnatpmp >/dev/null; then
-               libnatpmp_prefix=$($BREW --prefix libnatpmp 2>/dev/null)
-               if test "$suppress_external_warnings" != "no"; then
-                 NATPMP_CPPFLAGS="-isystem $libnatpmp_prefix/include"
-               else
-                 NATPMP_CPPFLAGS="-I$libnatpmp_prefix/include"
-               fi
-               NATPMP_LIBS="-L$libnatpmp_prefix/lib"
-             fi
+             dnl Automatic port mapping libraries are not detected or linked.
              ;;
          esac
        fi
@@ -1422,48 +1411,13 @@ if test "$build_bitcoind$bitcoin_enable_qt$use_bench$use_tests" = "nononono"; th
   use_zmq=no
 fi
 
-dnl Check for libminiupnpc (optional)
-if test "$use_upnp" != "no"; then
-  TEMP_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $MINIUPNPC_CPPFLAGS"
-  AC_CHECK_HEADERS(
-    [miniupnpc/miniupnpc.h miniupnpc/upnpcommands.h miniupnpc/upnperrors.h],
-    [AC_CHECK_LIB([miniupnpc], [upnpDiscover], [MINIUPNPC_LIBS="$MINIUPNPC_LIBS -lminiupnpc"], [have_miniupnpc=no], [$MINIUPNPC_LIBS])],
-    [have_miniupnpc=no]
-  )
-
-  dnl The minimum supported miniUPnPc API version is set to 17. This excludes
-  dnl versions with known vulnerabilities.
-  if test "$have_miniupnpc" != "no"; then
-    AC_MSG_CHECKING([whether miniUPnPc API version is supported])
-    AC_PREPROC_IFELSE([AC_LANG_PROGRAM([[
-        @%:@include <miniupnpc/miniupnpc.h>
-      ]], [[
-        #if MINIUPNPC_API_VERSION >= 17
-        // Everything is okay
-        #else
-        #  error miniUPnPc API version is too old
-        #endif
-      ]])],[
-        AC_MSG_RESULT([yes])
-      ],[
-      AC_MSG_RESULT([no])
-      AC_MSG_WARN([miniUPnPc API version < 17 is unsupported, disabling UPnP support.])
-      have_miniupnpc=no
-    ])
-  fi
-  CPPFLAGS="$TEMP_CPPFLAGS"
-fi
-
-dnl Check for libnatpmp (optional).
-if test "$use_natpmp" != "no"; then
-  TEMP_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $NATPMP_CPPFLAGS"
-  AC_CHECK_HEADERS([natpmp.h],
-                   [AC_CHECK_LIB([natpmp], [initnatpmp], [NATPMP_LIBS="$NATPMP_LIBS -lnatpmp"], [have_natpmp=no], [$NATPMP_LIBS])],
-                   [have_natpmp=no])
-  CPPFLAGS="$TEMP_CPPFLAGS"
-fi
+dnl UPnP and NAT-PMP were removed. Do not probe or link miniupnpc or libnatpmp.
+have_miniupnpc=no
+have_natpmp=no
+MINIUPNPC_LIBS=
+MINIUPNPC_CPPFLAGS=
+NATPMP_LIBS=
+NATPMP_CPPFLAGS=
 
 if test "$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoin_util$build_bitcoind$bitcoin_enable_qt$use_tests$use_bench$enable_fuzz_binary" = "nonononononononono"; then
   use_boost=no
@@ -1788,47 +1742,13 @@ else
   AC_MSG_RESULT([no])
 fi
 
-dnl enable upnp support
+dnl Automatic port mapping was removed. Never define USE_UPNP or USE_NATPMP.
 AC_MSG_CHECKING([whether to build with support for UPnP])
-if test "$have_miniupnpc" = "no"; then
-  if test "$use_upnp" = "yes"; then
-     AC_MSG_ERROR([UPnP requested but cannot be built. Use --without-miniupnpc])
-  fi
-  AC_MSG_RESULT([no])
-  use_upnp=no
-else
-  if test "$use_upnp" != "no"; then
-    AC_MSG_RESULT([yes])
-    use_upnp=yes
-    AC_DEFINE([USE_UPNP], [1], [Define to 1 if UPnP support should be compiled in.])
-    if test "$TARGET_OS" = "windows"; then
-      MINIUPNPC_CPPFLAGS="$MINIUPNPC_CPPFLAGS -DMINIUPNP_STATICLIB"
-    fi
-  else
-    AC_MSG_RESULT([no])
-  fi
-fi
-
-dnl Enable NAT-PMP support.
+AC_MSG_RESULT([no])
+use_upnp=no
 AC_MSG_CHECKING([whether to build with support for NAT-PMP])
-if test "$have_natpmp" = "no"; then
-  if test "$use_natpmp" = "yes"; then
-     AC_MSG_ERROR([NAT-PMP requested but cannot be built. Use --without-natpmp])
-  fi
-  AC_MSG_RESULT([no])
-  use_natpmp=no
-else
-  if test "$use_natpmp" != "no"; then
-    AC_MSG_RESULT([yes])
-    use_natpmp=yes
-    AC_DEFINE([USE_NATPMP], [1], [Define to 1 if UPnP support should be compiled in.])
-    if test "$TARGET_OS" = "windows"; then
-      NATPMP_CPPFLAGS="$NATPMP_CPPFLAGS -DSTATICLIB -DNATPMP_STATICLIB"
-    fi
-  else
-    AC_MSG_RESULT([no])
-  fi
-fi
+AC_MSG_RESULT([no])
+use_natpmp=no
 
 dnl these are only used when qt is enabled
 BUILD_TEST_QT=""

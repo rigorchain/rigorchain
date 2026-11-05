@@ -13,6 +13,7 @@
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 #include <qt/convergencepage.h>
+#include <qt/dualitystatisticspage.h>
 #include <qt/overviewpage.h>
 #include <qt/platformstyle.h>
 #include <qt/receivecoinsdialog.h>
@@ -52,6 +53,8 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
     convergencePage = new ConvergencePage(platformStyle);
     convergencePage->setWalletModel(walletModel);
 
+    dualityStatisticsPage = new DualityStatisticsPage(this);
+
     transactionsPage = new QWidget(this);
     QVBoxLayout *vbox = new QVBoxLayout();
     QHBoxLayout *hbox_buttons = new QHBoxLayout();
@@ -86,6 +89,7 @@ WalletView::WalletView(WalletModel* wallet_model, const PlatformStyle* _platform
     addWidget(receiveCoinsPage);
     addWidget(sendCoinsPage);
     addWidget(convergencePage);
+    addWidget(dualityStatisticsPage);
 
     connect(overviewPage, &OverviewPage::transactionClicked, this, &WalletView::transactionClicked);
     connect(overviewPage, &OverviewPage::transactionClicked, transactionView, qOverload<const QModelIndex&>(&TransactionView::focusTransaction));
@@ -202,6 +206,11 @@ void WalletView::gotoHistoryPage()
 void WalletView::gotoConvergencePage()
 {
     setCurrentWidget(convergencePage);
+}
+
+void WalletView::gotoDualityStatisticsPage()
+{
+    setCurrentWidget(dualityStatisticsPage);
 }
 
 void WalletView::gotoReceiveCoinsPage()

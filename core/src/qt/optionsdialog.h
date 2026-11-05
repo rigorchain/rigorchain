@@ -8,6 +8,8 @@
 #include <QDialog>
 #include <QValidator>
 
+#include <tor_mode.h>
+
 class ClientModel;
 class OptionsModel;
 class QValidatedLineEdit;
@@ -67,16 +69,37 @@ private Q_SLOTS:
     void updateProxyValidationState();
     /* query the networks, for which the default proxy is used */
     void updateDefaultProxyNets();
+    void updateTorFormState();
+    void refreshTorStatus();
 
 Q_SIGNALS:
     void proxyIpChecks(QValidatedLineEdit *pUiProxyIp, uint16_t nProxyPort);
     void quitOnReset();
 
 private:
+    void createTorGroup();
+    void loadTorForm();
+
     Ui::OptionsDialog *ui;
     ClientModel* m_client_model{nullptr};
     OptionsModel* model{nullptr};
     QDataWidgetMapper* mapper{nullptr};
+    class QComboBox* m_tor_mode{nullptr};
+    class QLineEdit* m_tor_socks_host{nullptr};
+    class QLineEdit* m_tor_socks_port{nullptr};
+    class QLineEdit* m_tor_control_host{nullptr};
+    class QLineEdit* m_tor_control_port{nullptr};
+    class QLineEdit* m_tor_password{nullptr};
+    class QLabel* m_tor_status{nullptr};
+    class QLabel* m_onion_address{nullptr};
+    class QLabel* m_onion_peers{nullptr};
+    class QLabel* m_tor_detail{nullptr};
+    class QPushButton* m_copy_onion{nullptr};
+    class QTimer* m_tor_timer{nullptr};
+    TorNetworkMode m_tor_mode_at_open{TorNetworkMode::Normal};
+    bool m_tor_form_dirty{false};
+    bool m_tor_loading{false};
+    QString m_active_onion;
 };
 
 #endif // BITCOIN_QT_OPTIONSDIALOG_H

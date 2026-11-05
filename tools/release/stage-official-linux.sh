@@ -43,6 +43,7 @@ else
         --disable-gui-tests \
         --disable-fuzz-binary \
         --without-miniupnpc \
+        --without-natpmp \
         --without-libs
     )
   fi

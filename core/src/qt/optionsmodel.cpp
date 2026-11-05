@@ -12,11 +12,12 @@
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 
+#include <chainparamsbase.h>
 #include <interfaces/node.h>
-#include <mapport.h>
 #include <primitives/transaction.h>
 #include <net.h>
 #include <netbase.h>
+#include <tor_mode.h>
 #include <txdb.h>       // for -dbcache defaults
 #include <util/string.h>
 #include <util/system.h>
@@ -43,8 +44,6 @@ static const char* SettingName(OptionsModel::OptionID option)
     case OptionsModel::ThreadsScriptVerif: return "par";
     case OptionsModel::SpendZeroConfChange: return "spendzeroconfchange";
     case OptionsModel::ExternalSignerPath: return "signer";
-    case OptionsModel::MapPortUPnP: return "upnp";
-    case OptionsModel::MapPortNatpmp: return "natpmp";
     case OptionsModel::Listen: return "listen";
     case OptionsModel::Server: return "server";
     case OptionsModel::PruneSize: return "prune";
@@ -186,8 +185,7 @@ bool OptionsModel::Init(bilingual_str& error)
 
     // These are shared with the core or have a command-line parameter
     // and we want command-line parameters to overwrite the GUI settings.
-    for (OptionID option : {DatabaseCache, ThreadsScriptVerif, SpendZeroConfChange, ExternalSignerPath, MapPortUPnP,
-                            MapPortNatpmp, Listen, Server, Prune, ProxyUse, ProxyUseTor, Language}) {
+    for (OptionID option : {DatabaseCache, ThreadsScriptVerif, SpendZeroConfChange, ExternalSignerPath, Listen, Server, Prune, ProxyUse, ProxyUseTor, Language}) {
         std::string setting = SettingName(option);
         if (node().isSettingIgnored(setting)) addOverriddenOption("-" + setting);
         try {
@@ -383,18 +381,6 @@ QVariant OptionsModel::getOption(OptionID option, const std::string& suffix) con
         return m_show_tray_icon;
     case MinimizeToTray:
         return fMinimizeToTray;
-    case MapPortUPnP:
-#ifdef USE_UPNP
-        return SettingToBool(setting(), DEFAULT_UPNP);
-#else
-        return false;
-#endif // USE_UPNP
-    case MapPortNatpmp:
-#ifdef USE_NATPMP
-        return SettingToBool(setting(), DEFAULT_NATPMP);
-#else
-        return false;
-#endif // USE_NATPMP
     case MinimizeOnClose:
         return fMinimizeOnClose;
 
@@ -490,18 +476,6 @@ bool OptionsModel::setOption(OptionID option, const QVariant& value, const std::
     case MinimizeToTray:
         fMinimizeToTray = value.toBool();
         settings.setValue("fMinimizeToTray", fMinimizeToTray);
-        break;
-    case MapPortUPnP: // core option - can be changed on-the-fly
-        if (changed()) {
-            update(value.toBool());
-            node().mapPort(value.toBool(), getOption(MapPortNatpmp).toBool());
-        }
-        break;
-    case MapPortNatpmp: // core option - can be changed on-the-fly
-        if (changed()) {
-            update(value.toBool());
-            node().mapPort(getOption(MapPortUPnP).toBool(), value.toBool());
-        }
         break;
     case MinimizeOnClose:
         fMinimizeOnClose = value.toBool();
@@ -710,6 +684,133 @@ bool OptionsModel::hasSigner()
     return gArgs.GetArg("-signer", "") != "";
 }
 
+static bool SettingIsOnlyOnion(const util::SettingsValue& value)
+{
+    if (value.isStr()) return value.get_str() == "onion";
+    if (value.isArray() && value.getValues().size() == 1 && value.getValues()[0].isStr()) {
+        return value.getValues()[0].get_str() == "onion";
+    }
+    return false;
+}
+
+static bool SettingIsOnionOnlyBind(const util::SettingsValue& value)
+{
+    auto one = [](const std::string& s) {
+        const bool loopback = s.find("127.0.0.1:") != std::string::npos || s.find("[::1]:") != std::string::npos;
+        return loopback && s.size() >= 6 && s.compare(s.size() - 6, 6, "=onion") == 0;
+    };
+    if (value.isStr()) return one(value.get_str());
+    if (value.isArray() && value.getValues().size() == 1 && value.getValues()[0].isStr()) {
+        return one(value.getValues()[0].get_str());
+    }
+    return false;
+}
+
+static bool ProxySettingIsSet(const util::SettingsValue& value)
+{
+    if (!value.isStr()) return false;
+    const std::string proxy = value.get_str();
+    return !proxy.empty() && proxy != "0";
+}
+
+TorNetworkMode OptionsModel::detectedTorNetworkMode() const
+{
+    TorSettingsPresence saved;
+    const util::SettingsValue listen = node().getPersistentSetting("listen");
+    const util::SettingsValue listen_onion = node().getPersistentSetting("listenonion");
+    saved.proxy_set = ProxySettingIsSet(node().getPersistentSetting("proxy"));
+    saved.separate_onion_proxy = ProxySettingIsSet(node().getPersistentSetting("onion"));
+    saved.listen_present = !listen.isNull();
+    saved.listen_value = SettingToBool(listen, false);
+    saved.listen_onion_present = !listen_onion.isNull();
+    saved.listen_onion_value = SettingToBool(listen_onion, false);
+    saved.onlynet_onion_only = SettingIsOnlyOnion(node().getPersistentSetting("onlynet"));
+    saved.bind_is_onion_only = SettingIsOnionOnlyBind(node().getPersistentSetting("bind"));
+    return InferTorNetworkMode(ResolveTorModeInputs(saved));
+}
+
+void OptionsModel::applyTorNetworkMode(TorNetworkMode mode, const QString& socks_host, int socks_port,
+                                       const QString& control_host, int control_port, const QString& password)
+{
+    const std::string socks = QString("%1:%2").arg(socks_host).arg(socks_port).toStdString();
+    const std::string control = QString("%1:%2").arg(control_host).arg(control_port).toStdString();
+    auto set = [&](const std::string& name, const util::SettingsValue& value) {
+        node().updateRwSetting(name, value);
+    };
+    auto unset = [&](const std::string& name) { set(name, util::SettingsValue{}); };
+    auto unset_bind_if_onion = [&]() {
+        if (SettingIsOnionOnlyBind(node().getPersistentSetting("bind"))) unset("bind");
+    };
+    auto unset_onlynet_if_onion = [&]() {
+        if (SettingIsOnlyOnion(node().getPersistentSetting("onlynet"))) unset("onlynet");
+    };
+
+    set("torcontrol", control);
+    if (password.isEmpty()) unset("torpassword");
+    else set("torpassword", password.toStdString());
+
+    const std::string onion_bind = strprintf("127.0.0.1:%u=onion", BaseParams().OnionServiceTargetPort());
+
+    switch (mode) {
+    case TorNetworkMode::Normal:
+        unset("proxy");
+        unset("onion");
+        unset_onlynet_if_onion();
+        unset_bind_if_onion();
+        unset("listenonion");
+        set("listen", true);
+        unset("discover");
+        unset("dns");
+        unset("dnsseed");
+        break;
+    case TorNetworkMode::OutboundOnly:
+        set("proxy", socks);
+        unset("onion");
+        unset_onlynet_if_onion();
+        unset_bind_if_onion();
+        set("listen", false);
+        set("listenonion", false);
+        set("discover", false);
+        unset("dns");
+        unset("dnsseed");
+        break;
+    case TorNetworkMode::InboundOutbound:
+        set("proxy", socks);
+        unset("onion");
+        unset_onlynet_if_onion();
+        unset_bind_if_onion();
+        set("listen", true);
+        set("listenonion", true);
+        set("discover", false);
+        unset("dns");
+        unset("dnsseed");
+        break;
+    case TorNetworkMode::Dual:
+        unset("proxy");
+        set("onion", socks);
+        unset_onlynet_if_onion();
+        unset_bind_if_onion();
+        set("listen", true);
+        set("listenonion", true);
+        unset("discover");
+        unset("dns");
+        unset("dnsseed");
+        break;
+    case TorNetworkMode::TorOnly:
+        set("proxy", socks);
+        unset("onion");
+        set("onlynet", "onion");
+        set("bind", onion_bind);
+        set("listen", true);
+        set("listenonion", true);
+        set("discover", false);
+        set("dns", false);
+        set("dnsseed", false);
+        break;
+    }
+    setRestartRequired(true);
+}
+
 void OptionsModel::checkAndMigrate()
 {
     // Migration of default values
@@ -766,8 +867,10 @@ void OptionsModel::checkAndMigrate()
     migrate_setting(SpendZeroConfChange, "bSpendZeroConfChange");
     migrate_setting(ExternalSignerPath, "external_signer_path");
 #endif
-    migrate_setting(MapPortUPnP, "fUseUPnP");
-    migrate_setting(MapPortNatpmp, "fUseNatpmp");
+    // Legacy automatic port-mapping keys are discarded. They are not copied
+    // into settings.json and they do not start discovery or mapping.
+    settings.remove("fUseUPnP");
+    settings.remove("fUseNatpmp");
     migrate_setting(Listen, "fListen");
     migrate_setting(Server, "server");
     migrate_setting(PruneSize, "nPruneSize");

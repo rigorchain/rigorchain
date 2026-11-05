@@ -161,9 +161,9 @@ BOOST_AUTO_TEST_CASE(maturity_adversarial_early_spend)
     ScriptError overflow{};
     const int64_t lock_past_int_max = 3000000000LL;
     BOOST_REQUIRE(lock_past_int_max > std::numeric_limits<int>::max());
-    const CScript far = GetResMintScript(lock_past_int_max, uint160());
+    const CScript far_script = GetResMintScript(lock_past_int_max, uint160());
     BOOST_REQUIRE_MESSAGE(
-        !VerifyRigorPredicate(CScript(), far, nullptr, flags, SpendHeightChecker(std::numeric_limits<int>::max()), &overflow),
+        !VerifyRigorPredicate(CScript(), far_script, nullptr, flags, SpendHeightChecker(std::numeric_limits<int>::max()), &overflow),
         "MATURITY_BYPASS_FOUND");
     BOOST_REQUIRE_MESSAGE(overflow == SCRIPT_ERR_UNSATISFIED_LOCKTIME, "MATURITY_BYPASS_FOUND");
     ScriptError unencodable{};

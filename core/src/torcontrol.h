@@ -33,6 +33,53 @@ void StopTorControl();
 
 CService DefaultOnionServiceTarget();
 
+/** True when the onion loopback target would collide with the public P2P
+ *  listener or the RPC port. A separate loopback listener is required; it
+ *  must not reuse either of those ports.
+ */
+bool OnionTargetConflictsWithNodePorts(uint16_t onion_port, uint16_t listen_port, uint16_t rpc_port, bool bind_on_any, const std::vector<uint16_t>& explicit_bind_ports = {});
+
+/** Leave a sensitive file readable and writable by the current user only.
+ *  POSIX: mode 0600. Windows: a protected DACL for the process user, with
+ *  inheritance removed. Returns false when the platform call fails.
+ */
+bool RestrictOnionKeyPermissions(const fs::path& path);
+
+/** ADD_ONION command. virtual_port is the advertised P2P port. target is the
+ *  loopback listener. The command has one Port mapping and must not name the RPC port.
+ */
+std::string MakeAddOnionCommand(const std::string& private_key, uint16_t virtual_port, const CService& target);
+
+/** Which control authentication to attempt. NULL is used only when no
+ *  stronger advertised method can be used. A configured password never falls
+ *  through to NULL or SAFECOOKIE.
+ */
+enum class TorAuthMethod {
+    HashedPassword,
+    SafeCookie,
+    Null,
+    PasswordRequired,
+    None,
+};
+
+TorAuthMethod SelectTorAuthMethod(bool password_configured, bool has_hashed_password, bool has_safecookie, bool has_null);
+
+/** Remove a PrivateKey value before a control reply is written to the log. */
+std::string RedactTorControlSecret(const std::string& line);
+
+/** Runtime result of the control connection. onion_service_active is set only
+ *  after ADD_ONION returns 250 and a service id is parsed.
+ */
+struct TorServiceStatus {
+    bool control_connected{false};
+    bool authenticated{false};
+    bool onion_service_active{false};
+    std::string onion_address;
+    std::string detail;
+};
+
+TorServiceStatus GetTorServiceStatus();
+
 /** Reply from Tor, can be single or multi-line */
 class TorControlReply
 {

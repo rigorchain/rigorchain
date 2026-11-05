@@ -856,6 +856,14 @@ Signing is only possible with addresses of the type 'legacy'.</source>
         <source>Original message:</source>
         <translation type="unfinished">原消息:</translation>
     </message>
+    <message>
+        <source>&amp;Duality Statistics</source>
+        <translation>双资产统计(&amp;D)</translation>
+    </message>
+    <message>
+        <source>Duality Statistics: local ORU and RES figures from this node</source>
+        <translation>Duality Statistics: local ORU and RES figures from this node</translation>
+    </message>
 </context>
 <context>
     <name>UnitDisplayStatusBarControl</name>

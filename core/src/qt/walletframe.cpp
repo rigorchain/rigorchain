@@ -182,6 +182,13 @@ void WalletFrame::gotoConvergencePage()
         i.value()->gotoConvergencePage();
 }
 
+void WalletFrame::gotoDualityStatisticsPage()
+{
+    QMap<WalletModel*, WalletView*>::const_iterator i;
+    for (i = mapWalletViews.constBegin(); i != mapWalletViews.constEnd(); ++i)
+        i.value()->gotoDualityStatisticsPage();
+}
+
 void WalletFrame::gotoReceiveCoinsPage()
 {
     QMap<WalletModel*, WalletView*>::const_iterator i;

@@ -60,6 +60,14 @@ fail_signed_attempt() {
   exit 1
 }
 
+case "${TARGET}" in
+  ""|macos-arm64) ;;
+  *)
+    echo "FAIL: macOS packaging target must be macos-arm64, got ${TARGET}" >&2
+    exit 1
+    ;;
+esac
+
 secrets_present=1
 [[ -n "${CERT}" ]] || secrets_present=0
 [[ -n "${PASS}" ]] || secrets_present=0
@@ -82,11 +90,7 @@ if [[ "${PROBE}" -eq 1 ]]; then
   exit 0
 fi
 
-[[ -n "${TARGET}" ]] || fail_signed_attempt "missing target macos-x86_64|macos-arm64"
-case "${TARGET}" in
-  macos-x86_64|macos-arm64) ;;
-  *) fail_signed_attempt "unsupported target ${TARGET}" ;;
-esac
+[[ "${TARGET}" == "macos-arm64" ]] || fail_signed_attempt "macOS packaging target must be macos-arm64"
 
 DMG="${ROOT}/dist/release/v${VERSION}/${TARGET}/rigor-v${VERSION}-${TARGET}.dmg"
 [[ -f "${DMG}" ]] || fail_signed_attempt "missing ${DMG}"

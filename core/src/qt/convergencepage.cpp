@@ -26,12 +26,9 @@
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
 #include <qt/walletmodel.h>
-#include <util/system.h>
 
 #include <univalue.h>
 
-#include <QApplication>
-#include <QLocale>
 #include <QDebug>
 #include <QDialog>
 #include <QElapsedTimer>
@@ -50,27 +47,6 @@
 #include <string>
 
 namespace {
-bool ConvergenceUiIsChinese()
-{
-    const QString lang = QString::fromStdString(gArgs.GetArg("-lang", ""));
-    if (lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)) return true;
-    const QString translated_convergence = QCoreApplication::translate("RigorGUI", "Convergence");
-    if (translated_convergence == QString::fromUtf8("汇聚")) return true;
-    return QLocale().name().startsWith(QLatin1String("zh"), Qt::CaseInsensitive);
-}
-
-QString ConvergenceDisclaimerText()
-{
-    if (ConvergenceUiIsChinese()) {
-        return QString::fromUtf8(
-            "钱包使用未来确认高度安全余量构造交易，避免因等待确认导致失效。\n"
-            "已销毁的 ORU 无法恢复。");
-    }
-    return QCoreApplication::translate("ConvergencePage",
-        "The wallet constructs the mint with a future confirmation-height safety margin so waiting to confirm does not void it.\n"
-        "Destroyed ORU cannot be recovered.");
-}
-
 void ClearHighlight(QLabel* label)
 {
     if (!label) return;
@@ -112,7 +88,9 @@ ConvergencePage::ConvergencePage(const PlatformStyle* platformStyle, QWidget* pa
         }
         if (ui->labelConvergeDisclaimer) {
             ui->labelConvergeDisclaimer->setVisible(true);
-            ui->labelConvergeDisclaimer->setText(ConvergenceDisclaimerText());
+            ui->labelConvergeDisclaimer->setText(tr(
+                "The wallet constructs the mint with a future confirmation-height safety margin so waiting to confirm does not void it.\n"
+                "Destroyed ORU cannot be recovered."));
             ui->labelConvergeDisclaimer->setStyleSheet(QStringLiteral("color: #FFFFFF; font-size: 13px;"));
             ui->verticalLayoutConvergeScroll->insertWidget(3, ui->labelConvergeDisclaimer);
         }

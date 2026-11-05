@@ -67,6 +67,12 @@ In a typical situation, this suffices to run behind a Tor proxy:
 
     ./rigord -proxy=127.0.0.1:9050
 
+`-proxy` also turns `-listen` off unless `-listen=1` is set explicitly, and
+`-listen=0` turns `-listenonion` off. The command above is outbound proxy
+operation. It does not create an onion service and it does not accept inbound
+onion connections. For an onion service, set `-listen=1` and leave
+`-listenonion` at its default, and configure Tor's control port. See section 2.
+
 ## 2. Automatically create a Rigor Core onion service
 
 Rigor Core makes use of Tor's control socket API to create and destroy
@@ -159,13 +165,14 @@ You can also manually configure your node to be reachable from the Tor network.
 Add these lines to your `/etc/tor/torrc` (or equivalent config file):
 
     HiddenServiceDir /var/lib/tor/arda-service/
-    HiddenServicePort 8333 127.0.0.1:8334
+    HiddenServicePort 8760 127.0.0.1:8762
 
 The directory can be different of course, but virtual port numbers should be equal to
-your rigord's P2P listen port (8333 by default), and target addresses and ports
-should be equal to binding address and port for inbound Tor connections (127.0.0.1:8334 by default).
+your rigord's P2P listen port (8760 by default), and target addresses and ports
+should be equal to binding address and port for inbound Tor connections (127.0.0.1:8762 by default).
+Do not forward to RPC port 8761. Do not reuse Bitcoin Core's 8333/8334 ports.
 
-    -externalip=X   You can tell arda about its publicly reachable addresses using
+    -externalip=X   You can tell rigord about its publicly reachable addresses using
                     this option, and this can be an onion address. Given the above
                     configuration, you can find your onion address in
                     /var/lib/tor/arda-service/hostname. For connections
@@ -203,7 +210,7 @@ as well, use `discover` instead:
 
     ./rigord ... -discover
 
-and open port 8333 on your firewall (or use port mapping, i.e., `-upnp` or `-natpmp`).
+and open the configured public P2P port on your firewall (mainnet default 8760). Automatic UPnP, NAT-PMP, and PCP port mapping are not available in this release.
 
 If you only want to use Tor to reach .onion addresses, but not use it as a proxy
 for normal IPv4/IPv6 communication, use:

@@ -105,8 +105,8 @@ The following can be set when running make: `make FOO=bar`
 - `NO_ZMQ`: Don't download/build/cache packages needed for enabling ZeroMQ
 - `NO_WALLET`: Don't download/build/cache libs needed to enable the wallet
 - `NO_SQLITE`: Don't download/build/cache SQLite
-- `NO_UPNP`: Don't download/build/cache packages needed for enabling UPnP
-- `NO_NATPMP`: Don't download/build/cache packages needed for enabling NAT-PMP
+- `NO_UPNP`: Retained for compatibility. UPnP was removed, so no UPnP package is built. Defaults to 1.
+- `NO_NATPMP`: Retained for compatibility. NAT-PMP was removed, so no NAT-PMP package is built. Defaults to 1.
 - `NO_USDT`: Don't download/build/cache packages needed for enabling USDT tracepoints
 - `ALLOW_HOST_PACKAGES`: Packages that are missed in dependencies (due to `NO_*` option or
   build script logic) are searched for among the host system packages using

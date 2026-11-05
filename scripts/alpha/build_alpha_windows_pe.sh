@@ -98,6 +98,7 @@ if [[ "${SKIP_CORE}" != "1" ]]; then
     --disable-tests \
     --disable-gui-tests \
     --without-miniupnpc \
+    --without-natpmp \
     --without-libs
   make -j"${JOBS}"
   for cand in \

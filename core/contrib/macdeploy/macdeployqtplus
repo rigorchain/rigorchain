@@ -180,9 +180,11 @@ class DeploymentInfo(object):
             self.qtPath = os.getenv("QTDIR", None)
 
         if self.qtPath is not None:
-            pluginPath = os.path.join(self.qtPath, "plugins")
-            if os.path.exists(pluginPath):
-                self.pluginPath = pluginPath
+            for relative in ("plugins", "share/qt/plugins", "share/qt5/plugins", "lib/qt5/plugins"):
+                pluginPath = os.path.join(self.qtPath, relative)
+                if os.path.isdir(pluginPath):
+                    self.pluginPath = pluginPath
+                    break
     
     def usesFramework(self, name: str) -> bool:
         for framework in self.deployedFrameworks:
@@ -350,10 +352,12 @@ def deployFrameworksForAppBundle(applicationBundle: ApplicationBundleInfo, strip
     else:
         return deployFrameworks(frameworks, applicationBundle.path, applicationBundle.binaryPath, strip, verbose)
 
+REQUIRED_QT_PLUGINS = ("libqminimal.dylib", "libqcocoa.dylib", "libqmacstyle.dylib")
+
 def deployPlugins(appBundleInfo: ApplicationBundleInfo, deploymentInfo: DeploymentInfo, strip: bool, verbose: int):
     plugins = []
     if deploymentInfo.pluginPath is None:
-        return
+        raise RuntimeError("Qt plugin directory was not found; refusing to build a bundle without Qt plugins")
     for dirpath, dirnames, filenames in os.walk(deploymentInfo.pluginPath):
         pluginDirectory = os.path.relpath(dirpath, deploymentInfo.pluginPath)
 
@@ -367,6 +371,11 @@ def deployPlugins(appBundleInfo: ApplicationBundleInfo, deploymentInfo: Deployme
                 continue
 
             plugins.append((pluginDirectory, pluginName))
+
+    found = {name for _directory, name in plugins}
+    missing = [name for name in REQUIRED_QT_PLUGINS if name not in found]
+    if missing:
+        raise RuntimeError("required Qt plugins were not found: " + ", ".join(missing))
     
     for pluginDirectory, pluginName in plugins:
         print("Processing plugin", os.path.join(pluginDirectory, pluginName), "...")
@@ -384,6 +393,12 @@ def deployPlugins(appBundleInfo: ApplicationBundleInfo, deploymentInfo: Deployme
         
         if strip:
             runStrip(destinationPath, verbose)
+
+        # The plugin's own LC_ID_DYLIB is not a dependency line that
+        # getFrameworks rewrites. Homebrew leaves it as an absolute path,
+        # which is the v0.2.1 inspection failure for these three plugins.
+        deployed_id = "@executable_path/../PlugIns/{}/{}".format(pluginDirectory, pluginName)
+        changeIdentification(deployed_id, destinationPath, verbose)
         
         dependencies = getFrameworks(destinationPath, verbose)
         
@@ -457,8 +472,8 @@ try:
     if deploymentInfo.qtPath is None:
         deploymentInfo.qtPath = os.getenv("QTDIR", None)
         if deploymentInfo.qtPath is None:
-            sys.stderr.write("Warning: Could not detect Qt's path, skipping plugin deployment!\n")
-            config.plugins = False
+            sys.stderr.write("Error: Could not detect Qt's path; refusing to skip plugin deployment\n")
+            sys.exit(1)
 except RuntimeError as e:
     sys.stderr.write(f"Error: {str(e)}\n")
     sys.exit(1)
@@ -560,7 +575,7 @@ print("+ Installing background.tiff +")
 bg_path = os.path.join('dist', '.background', 'background.tiff')
 os.mkdir(os.path.dirname(bg_path))
 
-tiff_path = os.path.join('contrib', 'macdeploy', 'background.tiff')
+tiff_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'background.tiff')
 shutil.copy2(tiff_path, bg_path)
 
 # ------------------------------------------------
@@ -568,6 +583,18 @@ shutil.copy2(tiff_path, bg_path)
 print("+ Generating symlink for /Applications +")
 
 os.symlink("/Applications", os.path.join('dist', "Applications"))
+
+# ------------------------------------------------
+
+inspector = Path(__file__).resolve().parents[3] / "tools" / "release" / "macos_bundle_inspect.py"
+if not inspector.is_file():
+    sys.stderr.write(f"Error: bundle inspector is missing: {inspector}\n")
+    sys.exit(1)
+print("+ Inspecting Mach-O dependencies before DMG creation +")
+inspect_run = run([sys.executable, str(inspector), "--bundle", target], text=True)
+if inspect_run.returncode != 0:
+    sys.stderr.write("Error: bundle dependency inspection failed; DMG was not created\n")
+    sys.exit(1)
 
 # ------------------------------------------------
 

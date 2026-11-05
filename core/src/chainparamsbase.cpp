@@ -50,8 +50,12 @@ const CBaseChainParams& BaseParams()
 }
 
 /**
- * Port numbers for incoming Tor connections (8334, 18334, 38334, 18445) have
- * been chosen arbitrarily to keep ranges of used ports tight.
+ * Loopback port Tor forwards the virtual P2P port to.
+ *
+ * Bitcoin Core uses P2P+1 (mainnet 8334) because its RPC port is P2P-1.
+ * RIGOR's RPC port is P2P+1 (mainnet 8761), so the onion target is P2P+2.
+ * It must not be the public P2P port (that bind is 0.0.0.0) and must not be
+ * the RPC port.
  */
 std::unique_ptr<CBaseChainParams> CreateBaseChainParams(const std::string& chain)
 {
@@ -59,15 +63,15 @@ std::unique_ptr<CBaseChainParams> CreateBaseChainParams(const std::string& chain
     // regtest port defaults for help text even in production builds.
     // Runtime network selection is gated in SelectBaseParams / GetChainName.
     if (chain == CBaseChainParams::MAIN) {
-        return std::make_unique<CBaseChainParams>("", 8761, 8334);
+        return std::make_unique<CBaseChainParams>("", 8761, 8762);
     } else if (chain == CBaseChainParams::TESTNET) {
-        return std::make_unique<CBaseChainParams>("testnet3", 18761, 18334);
+        return std::make_unique<CBaseChainParams>("testnet3", 18761, 18762);
     } else if (chain == CBaseChainParams::REGTEST) {
-        return std::make_unique<CBaseChainParams>("regtest", 28761, 18445);
+        return std::make_unique<CBaseChainParams>("regtest", 28761, 28762);
     } else if (chain == CBaseChainParams::DEVTEST) {
-        return std::make_unique<CBaseChainParams>("devtest", 48761, 48760);
+        return std::make_unique<CBaseChainParams>("devtest", 48761, 48762);
     } else if (chain == CBaseChainParams::SLOWTEST) {
-        return std::make_unique<CBaseChainParams>("slowtest", 49761, 49760);
+        return std::make_unique<CBaseChainParams>("slowtest", 49761, 49762);
     }
     throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }

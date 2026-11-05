@@ -4,8 +4,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TARGET="${1:?target macos-x86_64|macos-arm64}"
+TARGET="${1:?target macos-arm64}"
 EXPECT_ARCH="${2:?expected uname arch}"
+case "${TARGET}" in
+  macos-arm64) ;;
+  *) echo "FAIL: macOS packaging target must be macos-arm64, got ${TARGET}" >&2; exit 1 ;;
+esac
+[[ "${EXPECT_ARCH}" == "arm64" ]] || {
+  echo "FAIL: expected architecture must be arm64, got ${EXPECT_ARCH}" >&2
+  exit 1
+}
 VERSION="${RIGOR_RELEASE_VERSION:-0.2}"
 DMG="${ROOT}/dist/release/v${VERSION}/${TARGET}/rigor-v${VERSION}-${TARGET}.dmg"
 
@@ -38,6 +46,7 @@ for cand in "${MNT}/Rigor-Qt.app" "${MNT}/Rigor Wallet.app" "${MNT}"/*.app; do
 done
 [[ -n "${APP}" && -d "${APP}" ]] || { echo "FAIL: no .app in DMG" >&2; exit 1; }
 echo "APP=${APP}"
+python3 "${ROOT}/tools/release/macos_bundle_inspect.py" --bundle "${APP}"
 
 EXE=""
 for cand in \
@@ -53,10 +62,10 @@ done
 [[ -n "${EXE}" ]] || { echo "FAIL: no executable in ${APP}/Contents/MacOS" >&2; ls -la "${APP}/Contents/MacOS" >&2; exit 1; }
 echo "EXE=${EXE}"
 
-archs="$(lipo -archs "${EXE}" 2>/dev/null || file -b "${EXE}")"
+archs="$(lipo -archs "${EXE}" 2>/dev/null | tr -d '[:space:]' || true)"
 echo "LIPO=${archs}"
-echo "${archs}" | grep -q "${EXPECT_ARCH}" || {
-  echo "FAIL: expected arch ${EXPECT_ARCH}, got ${archs}" >&2
+[[ "${archs}" == "arm64" ]] || {
+  echo "FAIL: expected thin arm64, got ${archs}" >&2
   exit 1
 }
 

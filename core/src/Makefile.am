@@ -190,6 +190,7 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   net.h \
+  net_dns_seed.h \
   net/security/p2p_security_input.h \
   net/security/p2p_validation_result.h \
   net/security/p2p_message_boundary.h \
@@ -277,6 +278,7 @@ BITCOIN_CORE_H = \
   threadsafety.h \
   timedata.h \
   torcontrol.h \
+  tor_mode.h \
   txdb.h \
   txmempool.h \
   txorphanage.h \
@@ -378,7 +380,7 @@ obj/build.h: FORCE
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
 # node #
-libbitcoin_node_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BOOST_CPPFLAGS) $(MINIUPNPC_CPPFLAGS) $(NATPMP_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
+libbitcoin_node_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BOOST_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
 libbitcoin_node_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_node_a_SOURCES = \
   addrdb.cpp \
@@ -418,6 +420,9 @@ libbitcoin_node_a_SOURCES = \
   index/base.cpp \
   index/blockfilterindex.cpp \
   index/coinstatsindex.cpp \
+  index/economics_account.cpp \
+  index/economics_snapshot.cpp \
+  index/economicsindex.cpp \
   index/txindex.cpp \
   init.cpp \
   kernel/chain.cpp \
@@ -428,6 +433,7 @@ libbitcoin_node_a_SOURCES = \
   kernel/mempool_persist.cpp \
   mapport.cpp \
   net.cpp \
+  net_dns_seed.cpp \
   net/security/p2p_message_boundary.cpp \
   net_processing.cpp \
   netgroup.cpp \
@@ -467,6 +473,7 @@ libbitcoin_node_a_SOURCES = \
   pow_opus.cpp \
   rest.cpp \
   rpc/blockchain.cpp \
+  rpc/economics.cpp \
   rpc/fees.cpp \
   rpc/mempool.cpp \
   rpc/mining.cpp \
@@ -851,7 +858,7 @@ bitcoin_bin_ldadd = \
   $(LIBLEVELDB) \
   $(LIBMEMENV)
 
-bitcoin_bin_ldadd += $(MINIUPNPC_LIBS) $(NATPMP_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS) $(SQLITE_LIBS) $(SODIUM_LIBS)
+bitcoin_bin_ldadd += $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS) $(SQLITE_LIBS) $(SODIUM_LIBS)
 
 rigord_SOURCES = $(bitcoin_daemon_sources) init/rigord.cpp
 rigord_CPPFLAGS = $(bitcoin_bin_cppflags)
@@ -926,8 +933,6 @@ rigor_wallet_LDADD = \
   $(LIBLEVELDB) \
   $(LIBMEMENV) \
   $(SQLITE_LIBS) \
-  $(MINIUPNPC_LIBS) \
-  $(NATPMP_LIBS) \
   $(EVENT_LIBS) \
   $(EVENT_PTHREADS_LIBS) \
   $(SODIUM_LIBS)

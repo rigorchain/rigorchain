@@ -76,9 +76,10 @@ class MinChainWorkLaunchTest(BitcoinTestFramework):
                 raise AssertionError(
                     f"node {n.index} did not bind its own p2p port 127.0.0.1:{p2p}"
                 )
-            if "127.0.0.1:18445" in log:
+            if "127.0.0.1:28762" in log or "127.0.0.1:18445" in log:
                 raise AssertionError(
-                    f"node {n.index} bound the shared regtest onion port 127.0.0.1:18445"
+                    f"node {n.index} bound a shared onion port "
+                    "(127.0.0.1:28762 or the retired Bitcoin port 127.0.0.1:18445)"
                 )
         genesis_time = self.nodes[0].getblockheader(self.nodes[0].getblockhash(0))["time"]
         self.mocktime = genesis_time + 60

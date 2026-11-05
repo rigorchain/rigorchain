@@ -10,6 +10,7 @@
 #include <qt/guiconstants.h>
 
 #include <primitives/transaction.h>
+#include <tor_mode.h>
 
 #include <QAbstractListModel>
 
@@ -50,8 +51,6 @@ public:
         StartAtStartup,         // bool
         ShowTrayIcon,           // bool
         MinimizeToTray,         // bool
-        MapPortUPnP,            // bool
-        MapPortNatpmp,          // bool
         MinimizeOnClose,        // bool
         ProxyUse,               // bool
         ProxyIP,                // QString
@@ -117,6 +116,14 @@ public:
     bool isRestartRequired() const;
 
     interfaces::Node& node() const { return m_node; }
+
+    /** Mode implied by saved settings, including the -proxy → -listen=0 interaction. */
+    TorNetworkMode detectedTorNetworkMode() const;
+    /** Rewrite the existing proxy, listen, and onion settings to match a mode.
+     *  Control host must already be a loopback address. Password may be empty.
+     */
+    void applyTorNetworkMode(TorNetworkMode mode, const QString& socks_host, int socks_port,
+                             const QString& control_host, int control_port, const QString& password);
 
 private:
     interfaces::Node& m_node;

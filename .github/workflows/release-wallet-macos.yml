@@ -1,6 +1,7 @@
 # Real Rigor Wallet DMGs (Qt app bundle). Not an identity stub.
 # GitHub-hosted macOS only. WSL cannot emit Mach-O / UDZO.
-# Official names: rigor-v0.2-macos-x86_64.dmg / rigor-v0.2-macos-arm64.dmg
+# Official macOS artifact: rigor-v0.2-macos-arm64.dmg
+# macOS x86_64 is not a packaging target.
 # P0-094: CI environment recovery. P0-095: Developer ID signing (defers if secrets missing).
 # P0-101: tags v* must run this workflow (production governance gate).
 # Does not change wallet or consensus.
@@ -15,6 +16,7 @@ on:
 
 env:
   RIGOR_RELEASE_VERSION: "0.2"
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
 
 jobs:
   macos-wallet:
@@ -28,9 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: macos-x86_64
-            os: macos-15-intel
-            expected_arch: x86_64
           - target: macos-arm64
             os: macos-15
             expected_arch: arm64
@@ -80,6 +79,7 @@ jobs:
       - name: Build wallet DMG
         env:
           RIGOR_MACOS_DMG_VENV: ${{ runner.temp }}/rigor-macos-dmg-venv
+          RIGOR_MACOS_TARGET: ${{ matrix.target }}
         run: bash tools/release/build-macos-wallet-dmg.sh
 
       - name: Smoke-test DMG

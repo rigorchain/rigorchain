@@ -99,25 +99,9 @@ brew install qrencode
 ```
 ---
 
-#### Port Mapping Dependencies
+#### Port mapping
 
-###### miniupnpc
-
-miniupnpc may be used for UPnP port mapping.
-Skip if you do not need this functionality.
-
-``` bash
-brew install miniupnpc
-```
-
-###### libnatpmp
-
-libnatpmp may be used for NAT-PMP port mapping.
-Skip if you do not need this functionality.
-
-``` bash
-brew install libnatpmp
-```
+UPnP, NAT-PMP, and PCP are not part of this release. Do not install miniupnpc or libnatpmp for the official build. Forward the public P2P port on the router manually if inbound connections are required. The mainnet default is 8760.
 
 Note: UPnP and NAT-PMP support will be compiled in and disabled by default.
 Check out the [further configuration](#further-configuration) section for more information.

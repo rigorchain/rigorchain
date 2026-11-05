@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <torcontrol.h>
+#include <tor_mode.h>
 
 #include <chainparams.h>
 #include <chainparamsbase.h>
@@ -12,6 +13,7 @@
 #include <net.h>
 #include <netaddress.h>
 #include <netbase.h>
+#include <sync.h>
 #include <util/readwritefile.h>
 #include <util/strencodings.h>
 #include <util/syscall_sandbox.h>
@@ -22,7 +24,13 @@
 #include <deque>
 #include <functional>
 #include <set>
+#include <system_error>
 #include <vector>
+
+#ifdef WIN32
+#include <windows.h>
+#include <aclapi.h>
+#endif
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -50,6 +58,145 @@ static const float RECONNECT_TIMEOUT_EXP = 1.5;
  */
 static const int MAX_LINE_LENGTH = 100000;
 static const uint16_t DEFAULT_TOR_SOCKS_PORT = 9050;
+
+static Mutex g_tor_status_mutex;
+static TorServiceStatus g_tor_status GUARDED_BY(g_tor_status_mutex);
+
+static void UpdateTorServiceStatus(const std::function<void(TorServiceStatus&)>& fn)
+{
+    LOCK(g_tor_status_mutex);
+    fn(g_tor_status);
+}
+
+TorServiceStatus GetTorServiceStatus()
+{
+    LOCK(g_tor_status_mutex);
+    return g_tor_status;
+}
+
+TorModeInputs ResolveTorModeInputs(const TorSettingsPresence& saved)
+{
+    TorModeInputs in;
+    in.proxy_set = saved.proxy_set;
+    in.separate_onion_proxy = saved.separate_onion_proxy;
+    in.onlynet_onion_only = saved.onlynet_onion_only;
+    in.bind_is_onion_only = saved.bind_is_onion_only;
+    // -proxy SoftSets -listen=0, and -listen=0 SoftSets -listenonion=0,
+    // when those flags were left at the default. A SOCKS checkbox alone
+    // therefore does not create an onion service.
+    if (saved.proxy_set && !saved.listen_present && !saved.listen_onion_present) {
+        in.listen = false;
+        in.listen_onion = false;
+    } else {
+        in.listen = saved.listen_present ? saved.listen_value : true;
+        in.listen_onion = saved.listen_onion_present ? saved.listen_onion_value : true;
+    }
+    return in;
+}
+
+TorNetworkMode InferTorNetworkMode(const TorModeInputs& in)
+{
+    if (in.onlynet_onion_only && in.bind_is_onion_only && in.listen_onion) {
+        return TorNetworkMode::TorOnly;
+    }
+    if (!in.proxy_set && in.separate_onion_proxy && in.listen_onion) {
+        return TorNetworkMode::Dual;
+    }
+    if (in.proxy_set && in.listen_onion) {
+        return TorNetworkMode::InboundOutbound;
+    }
+    if (in.proxy_set && !in.listen_onion) {
+        return TorNetworkMode::OutboundOnly;
+    }
+    return TorNetworkMode::Normal;
+}
+
+std::string MakeAddOnionCommand(const std::string& private_key, uint16_t virtual_port, const CService& target)
+{
+    return strprintf("ADD_ONION %s Port=%u,%s", private_key, virtual_port, target.ToStringAddrPort());
+}
+
+TorAuthMethod SelectTorAuthMethod(bool password_configured, bool has_hashed_password, bool has_safecookie, bool has_null)
+{
+    if (password_configured) {
+        return has_hashed_password ? TorAuthMethod::HashedPassword : TorAuthMethod::PasswordRequired;
+    }
+    if (has_safecookie) return TorAuthMethod::SafeCookie;
+    if (has_null) return TorAuthMethod::Null;
+    if (has_hashed_password) return TorAuthMethod::PasswordRequired;
+    return TorAuthMethod::None;
+}
+
+std::string RedactTorControlSecret(const std::string& line)
+{
+    const std::string key = "PrivateKey=";
+    const size_t pos = line.find(key);
+    if (pos == std::string::npos) return line;
+    const size_t value = pos + key.size();
+    const size_t end = line.find(' ', value);
+    std::string out = line;
+    out.replace(value, end == std::string::npos ? std::string::npos : end - value, "[redacted]");
+    return out;
+}
+
+bool RestrictOnionKeyPermissions(const fs::path& path)
+{
+#ifdef WIN32
+    HANDLE process_token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token)) {
+        LogPrintf("tor: OpenProcessToken failed for %s (%lu)\n", fs::PathToString(path), GetLastError());
+        return false;
+    }
+    DWORD token_size = 0;
+    GetTokenInformation(process_token, TokenUser, nullptr, 0, &token_size);
+    std::vector<unsigned char> token_user(token_size);
+    if (!GetTokenInformation(process_token, TokenUser, token_user.data(), token_size, &token_size)) {
+        const DWORD error = GetLastError();
+        CloseHandle(process_token);
+        LogPrintf("tor: GetTokenInformation failed for %s (%lu)\n", fs::PathToString(path), error);
+        return false;
+    }
+    CloseHandle(process_token);
+
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE | DELETE;
+    access.grfAccessMode = GRANT_ACCESS;
+    access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = static_cast<LPWSTR>(reinterpret_cast<TOKEN_USER*>(token_user.data())->User.Sid);
+
+    PACL acl = nullptr;
+    const DWORD acl_result = SetEntriesInAclW(1, &access, nullptr, &acl);
+    if (acl_result != ERROR_SUCCESS || acl == nullptr) {
+        LogPrintf("tor: SetEntriesInAclW failed for %s (%lu)\n", fs::PathToString(path), acl_result);
+        return false;
+    }
+    std::wstring wide_path = path.wstring();
+    const DWORD set_result = SetNamedSecurityInfoW(
+        wide_path.data(),
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        nullptr,
+        nullptr,
+        acl,
+        nullptr);
+    LocalFree(acl);
+    if (set_result != ERROR_SUCCESS) {
+        LogPrintf("tor: SetNamedSecurityInfoW failed for %s (%lu)\n", fs::PathToString(path), set_result);
+        return false;
+    }
+    return true;
+#else
+    std::error_code ec;
+    fs::permissions(path, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace, ec);
+    if (ec) {
+        LogPrintf("tor: Could not restrict permissions on %s: %s\n", fs::PathToString(path), ec.message());
+        return false;
+    }
+    return true;
+#endif
+}
 
 /****** Low-level TorControlConnection ********/
 
@@ -416,23 +563,49 @@ void TorController::add_onion_cb(TorControlConnection& _conn, const TorControlRe
         if (service_id.empty()) {
             LogPrintf("tor: Error parsing ADD_ONION parameters:\n");
             for (const std::string &s : reply.lines) {
-                LogPrintf("    %s\n", SanitizeString(s));
+                LogPrintf("    %s\n", SanitizeString(RedactTorControlSecret(s)));
             }
+            UpdateTorServiceStatus([](TorServiceStatus& status) {
+                status.onion_service_active = false;
+                status.onion_address.clear();
+                status.detail = "ADD_ONION succeeded but ServiceID was missing";
+            });
             return;
         }
         service = LookupNumeric(std::string(service_id+".onion"), Params().GetDefaultPort());
         LogPrintfCategory(BCLog::TOR, "Got service ID %s, advertising service %s\n", service_id, service.ToStringAddrPort());
         if (WriteBinaryFile(GetPrivateKeyFile(), private_key)) {
+            RestrictOnionKeyPermissions(GetPrivateKeyFile());
             LogPrint(BCLog::TOR, "Cached service private key to %s\n", fs::PathToString(GetPrivateKeyFile()));
         } else {
             LogPrintf("tor: Error writing service private key to %s\n", fs::PathToString(GetPrivateKeyFile()));
         }
-        AddLocal(service, LOCAL_MANUAL);
+        const bool advertised = AddLocal(service, LOCAL_MANUAL);
+        const std::string onion_address = service_id + ".onion";
+        UpdateTorServiceStatus([&](TorServiceStatus& status) {
+            status.authenticated = true;
+            status.onion_service_active = true;
+            status.onion_address = onion_address;
+            status.detail = advertised ?
+                "Onion service created and registered for advertisement" :
+                "Onion service created; local advertisement was not accepted";
+        });
         // ... onion requested - keep connection open
     } else if (reply.code == 510) { // 510 Unrecognized command
         LogPrintf("tor: Add onion failed with unrecognized command (You probably need to upgrade Tor)\n");
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.onion_service_active = false;
+            status.onion_address.clear();
+            status.detail = "ADD_ONION unrecognized";
+        });
     } else {
         LogPrintf("tor: Add onion failed; error code %d\n", reply.code);
+        const int code = reply.code;
+        UpdateTorServiceStatus([code](TorServiceStatus& status) {
+            status.onion_service_active = false;
+            status.onion_address.clear();
+            status.detail = strprintf("ADD_ONION failed (%d)", code);
+        });
     }
 }
 
@@ -440,6 +613,13 @@ void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& 
 {
     if (reply.code == 250) {
         LogPrint(BCLog::TOR, "Authentication successful\n");
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.control_connected = true;
+            status.authenticated = true;
+            status.onion_service_active = false;
+            status.onion_address.clear();
+            status.detail = "Authenticated; onion service not created yet";
+        });
 
         // Now that we know Tor is running setup the proxy for onion addresses
         // if -onion isn't set to something else.
@@ -453,10 +633,16 @@ void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& 
         }
         // Request onion service, redirect port.
         // Note that the 'virtual' port is always the default port to avoid decloaking nodes using other ports.
-        _conn.Command(strprintf("ADD_ONION %s Port=%i,%s", private_key, Params().GetDefaultPort(), m_target.ToStringAddrPort()),
+        _conn.Command(MakeAddOnionCommand(private_key, Params().GetDefaultPort(), m_target),
             std::bind(&TorController::add_onion_cb, this, std::placeholders::_1, std::placeholders::_2));
     } else {
         LogPrintf("tor: Authentication failed\n");
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.authenticated = false;
+            status.onion_service_active = false;
+            status.onion_address.clear();
+            status.detail = "Authentication failed";
+        });
     }
 }
 
@@ -554,24 +740,24 @@ void TorController::protocolinfo_cb(TorControlConnection& _conn, const TorContro
         for (const std::string &s : methods) {
             LogPrint(BCLog::TOR, "Supported authentication method: %s\n", s);
         }
-        // Prefer NULL, otherwise SAFECOOKIE. If a password is provided, use HASHEDPASSWORD
-        /* Authentication:
-         *   cookie:   hex-encoded ~/.tor/control_auth_cookie
-         *   password: "password"
-         */
+        // Password wins when the operator set one. Otherwise SAFECOOKIE wins
+        // over NULL, so a control port that still advertises NULL cannot
+        // skip cookie authentication. NULL remains only when it is the only
+        // usable method.
         std::string torpassword = gArgs.GetArg("-torpassword", "");
-        if (!torpassword.empty()) {
-            if (methods.count("HASHEDPASSWORD")) {
-                LogPrint(BCLog::TOR, "Using HASHEDPASSWORD authentication\n");
-                ReplaceAll(torpassword, "\"", "\\\"");
-                _conn.Command("AUTHENTICATE \"" + torpassword + "\"", std::bind(&TorController::auth_cb, this, std::placeholders::_1, std::placeholders::_2));
-            } else {
-                LogPrintf("tor: Password provided with -torpassword, but HASHEDPASSWORD authentication is not available\n");
-            }
-        } else if (methods.count("NULL")) {
+        const TorAuthMethod auth_method = SelectTorAuthMethod(
+            !torpassword.empty(),
+            methods.count("HASHEDPASSWORD") != 0,
+            methods.count("SAFECOOKIE") != 0,
+            methods.count("NULL") != 0);
+        if (auth_method == TorAuthMethod::HashedPassword) {
+            LogPrint(BCLog::TOR, "Using HASHEDPASSWORD authentication\n");
+            ReplaceAll(torpassword, "\"", "\\\"");
+            _conn.Command("AUTHENTICATE \"" + torpassword + "\"", std::bind(&TorController::auth_cb, this, std::placeholders::_1, std::placeholders::_2));
+        } else if (auth_method == TorAuthMethod::Null) {
             LogPrint(BCLog::TOR, "Using NULL authentication\n");
             _conn.Command("AUTHENTICATE", std::bind(&TorController::auth_cb, this, std::placeholders::_1, std::placeholders::_2));
-        } else if (methods.count("SAFECOOKIE")) {
+        } else if (auth_method == TorAuthMethod::SafeCookie) {
             // Cookie: hexdump -e '32/1 "%02x""\n"'  ~/.tor/control_auth_cookie
             LogPrint(BCLog::TOR, "Using SAFECOOKIE authentication, reading cookie authentication from %s\n", cookiefile);
             std::pair<bool,std::string> status_cookie = ReadBinaryFile(fs::PathFromString(cookiefile), TOR_COOKIE_SIZE);
@@ -588,8 +774,12 @@ void TorController::protocolinfo_cb(TorControlConnection& _conn, const TorContro
                     LogPrintf("tor: Authentication cookie %s could not be opened (check permissions)\n", cookiefile);
                 }
             }
-        } else if (methods.count("HASHEDPASSWORD")) {
-            LogPrintf("tor: The only supported authentication mechanism left is password, but no password provided with -torpassword\n");
+        } else if (auth_method == TorAuthMethod::PasswordRequired) {
+            if (!torpassword.empty()) {
+                LogPrintf("tor: Password provided with -torpassword, but HASHEDPASSWORD authentication is not available\n");
+            } else {
+                LogPrintf("tor: The only supported authentication mechanism left is password, but no password provided with -torpassword\n");
+            }
         } else {
             LogPrintf("tor: No supported authentication method\n");
         }
@@ -601,6 +791,13 @@ void TorController::protocolinfo_cb(TorControlConnection& _conn, const TorContro
 void TorController::connected_cb(TorControlConnection& _conn)
 {
     reconnect_timeout = RECONNECT_TIMEOUT_START;
+    UpdateTorServiceStatus([](TorServiceStatus& status) {
+        status.control_connected = true;
+        status.authenticated = false;
+        status.onion_service_active = false;
+        status.onion_address.clear();
+        status.detail = "Control connection open; authentication not finished";
+    });
     // First send a PROTOCOLINFO command to figure out what authentication is expected
     if (!_conn.Command("PROTOCOLINFO 1", std::bind(&TorController::protocolinfo_cb, this, std::placeholders::_1, std::placeholders::_2)))
         LogPrintf("tor: Error sending initial protocolinfo command\n");
@@ -608,10 +805,18 @@ void TorController::connected_cb(TorControlConnection& _conn)
 
 void TorController::disconnected_cb(TorControlConnection& _conn)
 {
-    // Stop advertising service when disconnected
+    // Stop advertising service when disconnected. Closing this control
+    // connection also drops the non-detached onion service inside Tor.
     if (service.IsValid())
         RemoveLocal(service);
     service = CService();
+    UpdateTorServiceStatus([](TorServiceStatus& status) {
+        status.control_connected = false;
+        status.authenticated = false;
+        status.onion_service_active = false;
+        status.onion_address.clear();
+        status.detail = "Control connection closed";
+    });
     if (!reconnect)
         return;
 
@@ -701,4 +906,20 @@ CService DefaultOnionServiceTarget()
     struct in_addr onion_service_target;
     onion_service_target.s_addr = htonl(INADDR_LOOPBACK);
     return {onion_service_target, BaseParams().OnionServiceTargetPort()};
+}
+
+bool OnionTargetConflictsWithNodePorts(uint16_t onion_port, uint16_t listen_port, uint16_t rpc_port, bool bind_on_any, const std::vector<uint16_t>& explicit_bind_ports)
+{
+    if (onion_port == 0 || onion_port == rpc_port) return true;
+    // 0.0.0.0:listen_port already accepts 127.0.0.1:listen_port, so a second
+    // listen socket on that same port cannot be bound.
+    if (bind_on_any && onion_port == listen_port) return true;
+    // An explicit -bind/-whitebind on the onion port is a separate listener
+    // from the =onion socket. Same port on 0.0.0.0, or a second bind of
+    // 127.0.0.1:<onion>, fails or exposes the target. A bind on another port
+    // does not.
+    for (const uint16_t bound_port : explicit_bind_ports) {
+        if (bound_port == onion_port) return true;
+    }
+    return false;
 }

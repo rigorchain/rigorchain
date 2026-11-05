@@ -26,6 +26,7 @@
 #include <httpserver.h>
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
+#include <index/economicsindex.h>
 #include <index/txindex.h>
 #include <init/common.h>
 #include <interfaces/chain.h>
@@ -227,6 +228,9 @@ void Interrupt(NodeContext& node)
     if (g_coin_stats_index) {
         g_coin_stats_index->Interrupt();
     }
+    if (g_economics_index) {
+        g_economics_index->Interrupt();
+    }
 }
 
 void Shutdown(NodeContext& node)
@@ -305,6 +309,10 @@ void Shutdown(NodeContext& node)
     if (g_coin_stats_index) {
         g_coin_stats_index->Stop();
         g_coin_stats_index.reset();
+    }
+    if (g_economics_index) {
+        g_economics_index->Stop();
+        g_economics_index.reset();
     }
     ForEachBlockFilterIndex([](BlockFilterIndex& index) { index.Stop(); });
     DestroyAllBlockFilterIndexes();
@@ -438,6 +446,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blocksonly", strprintf("Whether to reject transactions from network peers. Automatic broadcast and rebroadcast of any transactions from inbound peers is disabled, unless the peer has the 'forcerelay' permission. RPC transactions are not affected. (default: %u)", DEFAULT_BLOCKSONLY), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-coinstatsindex", strprintf("Maintain coinstats index used by the gettxoutsetinfo RPC (default: %u)", DEFAULT_COINSTATSINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-economicsindex", strprintf("Maintain the local ORU/RES economics index used by Duality Statistics and geteconomics (default: %u)", DEFAULT_ECONOMICSINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-conf=<file>", strprintf("Specify path to read-only configuration file. Relative paths will be prefixed by datadir location (only useable from command line, not configuration file) (default: %s). bitcoin.conf is not read.", RIGOR_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-dbbatchsize", strprintf("Maximum database write batch size in bytes (default: %u)", nDefaultDbBatchSize), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::OPTIONS);
@@ -504,20 +513,8 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify a p2p connection timeout delay in seconds. After connecting to a peer, wait this amount of time before considering disconnection based on inactivity (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
-#ifdef USE_UPNP
-#if USE_UPNP
-    argsman.AddArg("-upnp", "Use UPnP to map the listening port (default: 1 when listening and no -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-#else
-    argsman.AddArg("-upnp", strprintf("Use UPnP to map the listening port (default: %u)", 0), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-#endif
-#else
-    hidden_args.emplace_back("-upnp");
-#endif
-#ifdef USE_NATPMP
-    argsman.AddArg("-natpmp", strprintf("Use NAT-PMP to map the listening port (default: %s)", DEFAULT_NATPMP ? "1 when listening and no -proxy" : "0"), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-#else
-    hidden_args.emplace_back("-natpmp");
-#endif // USE_NATPMP
+    argsman.AddArg("-upnp", "Ignored. Automatic UPnP port mapping was removed in this release (default: 0). Forward the public P2P port on the router manually if inbound connections are required.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-natpmp", "Ignored. Automatic NAT-PMP and PCP port mapping are not enabled in this release (default: 0). Forward the public P2P port on the router manually if inbound connections are required.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-whitebind=<[permissions@]addr>", "Bind to the given address and add permission flags to the peers connecting to it. "
         "Use [host]:port notation for IPv6. Allowed permissions: " + Join(NET_PERMISSIONS_DOC, ", ") + ". "
         "Specify multiple permissions separated by commas (default: download,noban,mempool,relay). Can be specified multiple times.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -993,6 +990,9 @@ bool AppInitParameterInteraction(const ArgsManager& args, bool use_syscall_sandb
         // indexes that must be deactivated to prevent index corruption, see #24630
         if (args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX)) {
             return InitError(_("-reindex-chainstate option is not compatible with -coinstatsindex. Please temporarily disable coinstatsindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
+        }
+        if (args.GetBoolArg("-economicsindex", DEFAULT_ECONOMICSINDEX)) {
+            return InitError(_("-reindex-chainstate option is not compatible with -economicsindex. Please temporarily disable economicsindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
         }
         if (g_enabled_filter_types.count(BlockFilterType::BASIC)) {
             return InitError(_("-reindex-chainstate option is not compatible with -blockfilterindex. Please temporarily disable blockfilterindex while using -reindex-chainstate, or replace -reindex-chainstate with -reindex to fully rebuild all indexes."));
@@ -1615,6 +1615,13 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         }
     }
 
+    if (args.GetBoolArg("-economicsindex", DEFAULT_ECONOMICSINDEX)) {
+        g_economics_index = std::make_unique<EconomicsIndex>(interfaces::MakeChain(node), /*cache_size=*/0, false, fReindex);
+        if (!g_economics_index->Start()) {
+            return false;
+        }
+    }
+
     // ********************************************************* Step 9: load wallet
     for (const auto& client : node.chain_clients) {
         if (!client->load()) {
@@ -1760,7 +1767,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     LogPrintf("nBestHeight = %d\n", chain_active_height);
     if (node.peerman) node.peerman->SetBestHeight(chain_active_height);
 
-    // Map ports with UPnP or NAT-PMP.
+    // Recognize legacy -upnp and -natpmp. StartMapPort logs and does not map.
     StartMapPort(args.GetBoolArg("-upnp", DEFAULT_UPNP), args.GetBoolArg("-natpmp", DEFAULT_NATPMP));
 
     CConnman::Options connOptions;
@@ -1836,10 +1843,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
 
     // DefaultOnionServiceTarget() is 127.0.0.1 on the chain's onion port
-    // (regtest: 18445). Binding it on every process makes a second local node
-    // fail startup. Only listen there when -listenonion is on, or when the
-    // operator named an onion bind. -listenonion=0 then keeps the per-node
-    // -port and does not open the shared onion port.
+    // (mainnet 8762, regtest 28762). Binding it on every process makes a
+    // second local node fail startup. Only listen there when -listenonion
+    // is on, or when the operator named an onion bind. -listenonion=0 then
+    // keeps the per-node -port and does not open the shared onion port.
     CService onion_service_target;
     const bool listen_onion = args.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION);
     if (!connOptions.onion_binds.empty()) {
@@ -1850,6 +1857,18 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
 
     if (listen_onion) {
+        const uint16_t listen_port = static_cast<uint16_t>(args.GetIntArg("-port", Params().GetDefaultPort()));
+        std::vector<uint16_t> explicit_bind_ports;
+        explicit_bind_ports.reserve(connOptions.vBinds.size() + connOptions.vWhiteBinds.size());
+        for (const CService& bind : connOptions.vBinds) {
+            explicit_bind_ports.push_back(bind.GetPort());
+        }
+        for (const NetWhitebindPermissions& whitebind : connOptions.vWhiteBinds) {
+            explicit_bind_ports.push_back(whitebind.m_service.GetPort());
+        }
+        if (OnionTargetConflictsWithNodePorts(onion_service_target.GetPort(), listen_port, BaseParams().RPCPort(), connOptions.bind_on_any, explicit_bind_ports)) {
+            return InitError(strprintf(_("Refusing onion service target port %u because it collides with the RPC port, the public P2P listener, or an explicit bind on that same port."), onion_service_target.GetPort()));
+        }
         if (connOptions.onion_binds.size() > 1) {
             InitWarning(strprintf(_("More than one onion bind address is provided. Using %s "
                                     "for the automatically created Tor onion service."),

@@ -5,9 +5,25 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <chainparamsbase.h>
+#include <netbase.h>
+#include <tor_mode.h>
+#include <torcontrol.h>
+
+#include <fstream>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
+
+#ifndef WIN32
+#include <sys/stat.h>
+#else
+#include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
+#endif
 
 
 std::pair<std::string, std::string> SplitTorReplyLine(const std::string& s);
@@ -197,6 +213,183 @@ BOOST_AUTO_TEST_CASE(util_ParseTorReplyMapping)
     CheckParseTorReplyMapping("MORE  ARGS", {});
     CheckParseTorReplyMapping("EVEN more=ARGS", {});
     CheckParseTorReplyMapping("EVEN+more ARGS", {});
+}
+
+BOOST_AUTO_TEST_CASE(add_onion_maps_p2p_port_not_rpc)
+{
+    const CService target = LookupNumeric("127.0.0.1", 8762);
+    BOOST_CHECK(target.IsValid());
+    const std::string cmd = MakeAddOnionCommand("NEW:ED25519-V3", 8760, target);
+    BOOST_CHECK_EQUAL(cmd, "ADD_ONION NEW:ED25519-V3 Port=8760,127.0.0.1:8762");
+    BOOST_CHECK(cmd.find("8761") == std::string::npos);
+    BOOST_CHECK(cmd.find("8334") == std::string::npos);
+    BOOST_CHECK_EQUAL(cmd.find("Port="), cmd.rfind("Port="));
+}
+
+BOOST_AUTO_TEST_CASE(onion_target_ports_stay_off_p2p_and_rpc)
+{
+    const struct {
+        const char* chain;
+        uint16_t p2p;
+        uint16_t rpc;
+        uint16_t onion;
+    } cases[] = {
+        {"main", 8760, 8761, 8762},
+        {"test", 18760, 18761, 18762},
+        {"regtest", 28760, 28761, 28762},
+        {"devtest", 48760, 48761, 48762},
+        {"slowtest", 49760, 49761, 49762},
+    };
+    for (const auto& c : cases) {
+        const std::unique_ptr<CBaseChainParams> params = CreateBaseChainParams(c.chain);
+        BOOST_CHECK_EQUAL(params->RPCPort(), c.rpc);
+        BOOST_CHECK_EQUAL(params->OnionServiceTargetPort(), c.onion);
+        BOOST_CHECK(params->OnionServiceTargetPort() != c.p2p);
+        BOOST_CHECK(params->OnionServiceTargetPort() != params->RPCPort());
+        BOOST_CHECK(params->OnionServiceTargetPort() != 8334);
+        BOOST_CHECK(params->OnionServiceTargetPort() != 18445);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(infer_tor_network_mode)
+{
+    TorModeInputs failed;
+    failed.proxy_set = true;
+    failed.listen = false;
+    failed.listen_onion = false;
+    BOOST_CHECK(InferTorNetworkMode(failed) == TorNetworkMode::OutboundOnly);
+
+    TorModeInputs inbound;
+    inbound.proxy_set = true;
+    inbound.listen = true;
+    inbound.listen_onion = true;
+    BOOST_CHECK(InferTorNetworkMode(inbound) == TorNetworkMode::InboundOutbound);
+
+    TorModeInputs dual;
+    dual.separate_onion_proxy = true;
+    dual.listen = true;
+    dual.listen_onion = true;
+    BOOST_CHECK(InferTorNetworkMode(dual) == TorNetworkMode::Dual);
+
+    TorModeInputs only_tor;
+    only_tor.proxy_set = true;
+    only_tor.listen = true;
+    only_tor.listen_onion = true;
+    only_tor.onlynet_onion_only = true;
+    only_tor.bind_is_onion_only = true;
+    BOOST_CHECK(InferTorNetworkMode(only_tor) == TorNetworkMode::TorOnly);
+
+    BOOST_CHECK(InferTorNetworkMode(TorModeInputs{}) == TorNetworkMode::Normal);
+
+    TorSettingsPresence socks_only;
+    socks_only.proxy_set = true;
+    BOOST_CHECK(InferTorNetworkMode(ResolveTorModeInputs(socks_only)) == TorNetworkMode::OutboundOnly);
+
+    TorSettingsPresence explicit_inbound;
+    explicit_inbound.proxy_set = true;
+    explicit_inbound.listen_present = true;
+    explicit_inbound.listen_value = true;
+    explicit_inbound.listen_onion_present = true;
+    explicit_inbound.listen_onion_value = true;
+    BOOST_CHECK(InferTorNetworkMode(ResolveTorModeInputs(explicit_inbound)) == TorNetworkMode::InboundOutbound);
+}
+
+BOOST_AUTO_TEST_CASE(onion_target_conflict)
+{
+    BOOST_CHECK(!OnionTargetConflictsWithNodePorts(8762, 8760, 8761, true));
+    BOOST_CHECK(OnionTargetConflictsWithNodePorts(8761, 8760, 8761, true));
+    BOOST_CHECK(OnionTargetConflictsWithNodePorts(8760, 8760, 8761, true));
+    BOOST_CHECK(!OnionTargetConflictsWithNodePorts(8762, 8762, 8761, false));
+    BOOST_CHECK(OnionTargetConflictsWithNodePorts(0, 8760, 8761, true));
+    // Explicit -bind/-whitebind on the onion port collides even when -port
+    // itself stays on the public P2P port and bind_on_any is false.
+    BOOST_CHECK(OnionTargetConflictsWithNodePorts(8762, 8760, 8761, false, std::vector<uint16_t>{8762}));
+    BOOST_CHECK(OnionTargetConflictsWithNodePorts(8762, 8760, 8761, false, std::vector<uint16_t>{8760, 8762}));
+    BOOST_CHECK(!OnionTargetConflictsWithNodePorts(8762, 8760, 8761, false, std::vector<uint16_t>{8760}));
+    for (const char* chain : {"main", "test", "regtest", "devtest", "slowtest"}) {
+        const std::unique_ptr<CBaseChainParams> params = CreateBaseChainParams(chain);
+        const uint16_t onion = params->OnionServiceTargetPort();
+        const uint16_t rpc = params->RPCPort();
+        const uint16_t listen = static_cast<uint16_t>(rpc - 1);
+        BOOST_CHECK(!OnionTargetConflictsWithNodePorts(onion, listen, rpc, true));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(onion_key_file_is_restricted_to_the_current_user)
+{
+    const fs::path dir = fs::temp_directory_path() / "rigor-onion-acl-test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path file = dir / "onion_v3_private_key";
+    {
+        std::ofstream out(file);
+        out << "not-a-real-onion-key\n";
+    }
+    BOOST_CHECK(RestrictOnionKeyPermissions(file));
+#ifndef WIN32
+    struct stat st {};
+    BOOST_CHECK_EQUAL(::stat(fs::PathToString(file).c_str(), &st), 0);
+    BOOST_CHECK_EQUAL(st.st_mode & 0777, 0600);
+#else
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    PACL dacl = nullptr;
+    BOOST_CHECK_EQUAL(GetNamedSecurityInfoW(file.wstring().c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &descriptor), static_cast<DWORD>(ERROR_SUCCESS));
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    BOOST_CHECK(GetSecurityDescriptorControl(descriptor, &control, &revision));
+    BOOST_CHECK((control & SE_DACL_PROTECTED) != 0);
+    BOOST_CHECK(dacl != nullptr);
+    if (dacl != nullptr) {
+        ACL_SIZE_INFORMATION info{};
+        BOOST_CHECK(GetAclInformation(dacl, &info, sizeof(info), AclSizeInformation));
+        BOOST_CHECK_EQUAL(info.AceCount, 1u);
+        for (DWORD i = 0; i < info.AceCount; ++i) {
+            LPVOID ace = nullptr;
+            BOOST_CHECK(GetAce(dacl, i, &ace));
+            if (!ace) continue;
+            const auto* header = static_cast<ACE_HEADER*>(ace);
+            PSID sid = nullptr;
+            if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+                sid = reinterpret_cast<PSID>(&reinterpret_cast<ACCESS_ALLOWED_ACE*>(ace)->SidStart);
+            }
+            LPSTR text = nullptr;
+            if (sid != nullptr && ConvertSidToStringSidA(sid, &text)) {
+                const std::string sid_text = text;
+                LocalFree(text);
+                BOOST_CHECK(sid_text != "S-1-1-0");
+                BOOST_CHECK(sid_text != "S-1-5-11");
+                BOOST_CHECK(sid_text != "S-1-5-32-545");
+                BOOST_CHECK(sid_text != "S-1-5-32-544");
+                BOOST_CHECK(sid_text.rfind("S-1-5-21-", 0) == 0);
+            }
+        }
+    }
+    LocalFree(descriptor);
+#endif
+    fs::remove_all(dir);
+}
+
+BOOST_AUTO_TEST_CASE(tor_service_status_starts_inactive)
+{
+    const TorServiceStatus status = GetTorServiceStatus();
+    BOOST_CHECK(!status.onion_service_active);
+    BOOST_CHECK(status.onion_address.empty());
+}
+
+BOOST_AUTO_TEST_CASE(auth_method_prefers_safecookie_over_null)
+{
+    BOOST_CHECK(SelectTorAuthMethod(false, true, true, true) == TorAuthMethod::SafeCookie);
+    BOOST_CHECK(SelectTorAuthMethod(false, false, true, true) == TorAuthMethod::SafeCookie);
+    BOOST_CHECK(SelectTorAuthMethod(false, false, false, true) == TorAuthMethod::Null);
+    BOOST_CHECK(SelectTorAuthMethod(true, true, true, true) == TorAuthMethod::HashedPassword);
+    BOOST_CHECK(SelectTorAuthMethod(true, false, true, true) == TorAuthMethod::PasswordRequired);
+    BOOST_CHECK(SelectTorAuthMethod(false, true, false, false) == TorAuthMethod::PasswordRequired);
+    BOOST_CHECK(SelectTorAuthMethod(false, false, false, false) == TorAuthMethod::None);
+    const std::string line = "ServiceID=abc PrivateKey=ED25519-V3:secretvalue Flags=None";
+    const std::string redacted = RedactTorControlSecret(line);
+    BOOST_CHECK(redacted.find("secretvalue") == std::string::npos);
+    BOOST_CHECK(redacted.find("PrivateKey=[redacted]") != std::string::npos);
+    BOOST_CHECK_EQUAL(RedactTorControlSecret("ServiceID=abc"), "ServiceID=abc");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -10,6 +10,7 @@
 class CRPCTable;
 
 void RegisterBlockchainRPCCommands(CRPCTable &tableRPC);
+void RegisterEconomicsRPCCommands(CRPCTable &tableRPC);
 void RegisterFeeRPCCommands(CRPCTable&);
 void RegisterMempoolRPCCommands(CRPCTable&);
 void RegisterMiningRPCCommands(CRPCTable &tableRPC);
@@ -24,6 +25,7 @@ void RegisterTxoutProofRPCCommands(CRPCTable&);
 static inline void RegisterAllCoreRPCCommands(CRPCTable &t)
 {
     RegisterBlockchainRPCCommands(t);
+    RegisterEconomicsRPCCommands(t);
     RegisterFeeRPCCommands(t);
     RegisterMempoolRPCCommands(t);
     RegisterMiningRPCCommands(t);

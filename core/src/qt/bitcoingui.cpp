@@ -249,6 +249,9 @@ RigorGUI::RigorGUI(interfaces::Node& node, const PlatformStyle *_platformStyle, 
     if (convergenceAction) {
         convergenceAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/convergence"))));
     }
+    if (dualityStatisticsAction) {
+        dualityStatisticsAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/duality_statistics"))));
+    }
 
     GUIUtil::handleCloseWindowShortcut(this);
 }
@@ -311,6 +314,13 @@ void RigorGUI::createActions()
     convergenceAction->setShortcut(QKeySequence(QStringLiteral("Alt+5")));
     tabGroup->addAction(convergenceAction);
 
+    dualityStatisticsAction = new QAction(platformStyle->SingleColorIcon(QStringLiteral(":/icons/duality_statistics")), tr("&Duality Statistics"), this);
+    dualityStatisticsAction->setStatusTip(tr("Duality Statistics: local ORU and RES figures from this node"));
+    dualityStatisticsAction->setToolTip(dualityStatisticsAction->statusTip());
+    dualityStatisticsAction->setCheckable(true);
+    dualityStatisticsAction->setShortcut(QKeySequence(QStringLiteral("Alt+6")));
+    tabGroup->addAction(dualityStatisticsAction);
+
 #ifdef ENABLE_WALLET
     // These showNormalIfMinimized are needed because Send Coins and Receive Coins
     // can be triggered from the tray menu, and need to show the GUI to be useful.
@@ -324,6 +334,8 @@ void RigorGUI::createActions()
     connect(historyAction, &QAction::triggered, this, &RigorGUI::gotoHistoryPage);
     connect(convergenceAction, &QAction::triggered, [this]{ showNormalIfMinimized(); });
     connect(convergenceAction, &QAction::triggered, this, &RigorGUI::gotoConvergencePage);
+    connect(dualityStatisticsAction, &QAction::triggered, [this]{ showNormalIfMinimized(); });
+    connect(dualityStatisticsAction, &QAction::triggered, this, &RigorGUI::gotoDualityStatisticsPage);
 #endif // ENABLE_WALLET
 
     quitAction = new QAction(tr("E&xit"), this);
@@ -622,6 +634,7 @@ void RigorGUI::createToolBars()
         toolbar->addAction(receiveCoinsAction);
         toolbar->addAction(historyAction);
         toolbar->addAction(convergenceAction);
+        toolbar->addAction(dualityStatisticsAction);
         overviewAction->setChecked(true);
 
 #ifdef ENABLE_WALLET
@@ -837,6 +850,7 @@ void RigorGUI::setWalletActionsEnabled(bool enabled)
     receiveCoinsAction->setEnabled(enabled);
     historyAction->setEnabled(enabled);
     convergenceAction->setEnabled(enabled);
+    if (dualityStatisticsAction) dualityStatisticsAction->setEnabled(enabled);
     encryptWalletAction->setEnabled(enabled);
     backupWalletAction->setEnabled(enabled);
     changePassphraseAction->setEnabled(enabled);
@@ -1013,6 +1027,15 @@ void RigorGUI::gotoConvergencePage()
     convergenceAction->setChecked(true);
     if (walletFrame) walletFrame->gotoConvergencePage();
     qInfo().noquote() << QStringLiteral("[ui-perf] nav Convergence %1ms").arg(t.elapsed());
+}
+
+void RigorGUI::gotoDualityStatisticsPage()
+{
+    QElapsedTimer t;
+    t.start();
+    if (dualityStatisticsAction) dualityStatisticsAction->setChecked(true);
+    if (walletFrame) walletFrame->gotoDualityStatisticsPage();
+    qInfo().noquote() << QStringLiteral("[ui-perf] nav DualityStatistics %1ms").arg(t.elapsed());
 }
 
 void RigorGUI::gotoReceiveCoinsPage()
@@ -1380,6 +1403,9 @@ void RigorGUI::changeEvent(QEvent *e)
         receiveCoinsAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/receiving_addresses"))));
         historyAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/history"))));
         convergenceAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/convergence"))));
+        if (dualityStatisticsAction) {
+            dualityStatisticsAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/duality_statistics"))));
+        }
     }
 
     QMainWindow::changeEvent(e);

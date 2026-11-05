@@ -35,7 +35,8 @@ void OptionTests::migrateSettings()
     QSettings settings;
     settings.setValue("nDatabaseCache", 600);
     settings.setValue("nThreadsScriptVerif", 12);
-    settings.setValue("fUseUPnP", false);
+    settings.setValue("fUseUPnP", true);
+    settings.setValue("fUseNatpmp", true);
     settings.setValue("fListen", false);
     settings.setValue("bPrune", true);
     settings.setValue("nPruneSize", 3);
@@ -52,6 +53,7 @@ void OptionTests::migrateSettings()
     QVERIFY(!settings.contains("nDatabaseCache"));
     QVERIFY(!settings.contains("nThreadsScriptVerif"));
     QVERIFY(!settings.contains("fUseUPnP"));
+    QVERIFY(!settings.contains("fUseNatpmp"));
     QVERIFY(!settings.contains("fListen"));
     QVERIFY(!settings.contains("bPrune"));
     QVERIFY(!settings.contains("nPruneSize"));
@@ -69,6 +71,33 @@ void OptionTests::migrateSettings()
         "    \"proxy\": \"proxy:123\",\n"
         "    \"prune\": \"2861\"\n"
         "}\n");
+}
+
+void OptionTests::languagePersistence()
+{
+    QSettings settings;
+    settings.setValue("language", "zh_TW");
+    settings.sync();
+
+    bilingual_str error;
+    OptionsModel migrated{m_node};
+    QVERIFY(migrated.Init(error));
+    QVERIFY(!settings.contains("language"));
+    QCOMPARE(migrated.getOption(OptionsModel::Language).toString(), QString("zh_TW"));
+    QCOMPARE(QString::fromStdString(gArgs.GetArg("-lang", "")), QString("zh_TW"));
+
+    std::ifstream file(gArgs.GetDataDirNet() / "settings.json");
+    const std::string json{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    QVERIFY2(json.find("\"lang\": \"zh_TW\"") != std::string::npos, json.c_str());
+
+    QVERIFY(migrated.setOption(OptionsModel::Language, QString("zh_HK")));
+    QVERIFY(migrated.isRestartRequired());
+    QCOMPARE(migrated.getOption(OptionsModel::Language).toString(), QString("zh_HK"));
+
+    OptionsModel restarted{m_node};
+    QVERIFY(restarted.Init(error));
+    QCOMPARE(restarted.getOption(OptionsModel::Language).toString(), QString("zh_HK"));
+    QCOMPARE(QString::fromStdString(gArgs.GetArg("-lang", "")), QString("zh_HK"));
 }
 
 void OptionTests::integerGetArgBug()

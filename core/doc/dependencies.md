@@ -35,8 +35,7 @@ You can find installation instructions in the `build-*.md` file for your platfor
 ### Networking
 | Dependency | Releases | Version used | Minimum required | Runtime |
 | --- | --- | --- | --- | --- |
-| [libnatpmp](../depends/packages/libnatpmp.mk) | [link](https://github.com/miniupnp/libnatpmp/) | commit [07004b9...](https://github.com/arda/arda/pull/25917) | | No |
-| [MiniUPnPc](../depends/packages/miniupnpc.mk) | [link](https://miniupnp.tuxfamily.org/) | [2.2.2](https://github.com/arda/arda/pull/20421) | 2.1 | No |
+| miniupnpc and libnatpmp | removed in v0.2.2 | not used | | No |
 
 ### Notifications
 | Dependency | Releases | Version used | Minimum required | Runtime |

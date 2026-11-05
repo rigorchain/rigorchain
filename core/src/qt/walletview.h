@@ -13,6 +13,7 @@
 
 class ClientModel;
 class ConvergencePage;
+class DualityStatisticsPage;
 class OverviewPage;
 class PlatformStyle;
 class ReceiveCoinsDialog;
@@ -63,6 +64,7 @@ private:
 
     OverviewPage *overviewPage{nullptr};
     ConvergencePage *convergencePage{nullptr};
+    DualityStatisticsPage *dualityStatisticsPage{nullptr};
     QWidget *transactionsPage{nullptr};
     ReceiveCoinsDialog *receiveCoinsPage{nullptr};
     SendCoinsDialog *sendCoinsPage{nullptr};
@@ -93,6 +95,7 @@ public Q_SLOTS:
     void gotoHistoryPage();
     /** Switch to convergence page */
     void gotoConvergencePage();
+    void gotoDualityStatisticsPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

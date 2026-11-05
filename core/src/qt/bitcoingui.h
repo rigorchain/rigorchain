@@ -140,6 +140,7 @@ private:
     QAction* overviewAction = nullptr;
     QAction* historyAction = nullptr;
     QAction* convergenceAction = nullptr;
+    QAction* dualityStatisticsAction = nullptr;
     QAction* quitAction = nullptr;
     QAction* sendCoinsAction = nullptr;
     QAction* usedSendingAddressesAction = nullptr;
@@ -283,6 +284,8 @@ public Q_SLOTS:
     void gotoHistoryPage();
     /** Switch to convergence page */
     void gotoConvergencePage();
+    /** Switch to the Duality Statistics page */
+    void gotoDualityStatisticsPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

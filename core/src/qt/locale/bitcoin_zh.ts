@@ -470,7 +470,15 @@ Signing is only possible with addresses of the type 'legacy'.</source>
         <source>Error: %1</source>
         <translation type="unfinished">错误: %1</translation>
     </message>
-    </context>
+        <message>
+        <source>&amp;Duality Statistics</source>
+        <translation>双资产统计(&amp;D)</translation>
+    </message>
+    <message>
+        <source>Duality Statistics: local ORU and RES figures from this node</source>
+        <translation>Duality Statistics: local ORU and RES figures from this node</translation>
+    </message>
+</context>
 <context>
     <name>CoinControlDialog</name>
     <message>

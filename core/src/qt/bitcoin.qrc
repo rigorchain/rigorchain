@@ -34,6 +34,7 @@
         <file alias="remove">res/icons/remove.png</file>
         <file alias="tx_mined">res/icons/tx_mined.png</file>
         <file alias="convergence">res/icons/convergence.png</file>
+        <file alias="duality_statistics">res/icons/duality_statistics.png</file>
         <file alias="tx_input">res/icons/tx_input.png</file>
         <file alias="tx_output">res/icons/tx_output.png</file>
         <file alias="tx_inout">res/icons/tx_inout.png</file>

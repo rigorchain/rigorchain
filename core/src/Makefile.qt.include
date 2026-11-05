@@ -52,6 +52,7 @@ QT_MOC_CPP = \
   qt/moc_csvmodelwriter.cpp \
   qt/moc_editaddressdialog.cpp \
   qt/moc_convergencepage.cpp \
+  qt/moc_dualitystatisticspage.cpp \
   qt/moc_guiutil.cpp \
   qt/moc_initexecutor.cpp \
   qt/moc_intro.cpp \
@@ -146,6 +147,7 @@ BITCOIN_QT_H = \
   qt/csvmodelwriter.h \
   qt/editaddressdialog.h \
   qt/convergencepage.h \
+  qt/dualitystatisticspage.h \
   qt/guiconstants.h \
   qt/guiutil.h \
   qt/initexecutor.h \
@@ -315,6 +317,7 @@ BITCOIN_QT_WALLET_CPP = \
   qt/createwalletdialog.cpp \
   qt/editaddressdialog.cpp \
   qt/convergencepage.cpp \
+  qt/dualitystatisticspage.cpp \
   qt/keymanagementdialog.cpp \
   qt/openuridialog.cpp \
   qt/overviewpage.cpp \
@@ -417,7 +420,7 @@ if ENABLE_ZMQ
 bitcoin_qt_ldadd += $(LIBBITCOIN_ZMQ) $(ZMQ_LIBS)
 endif
 bitcoin_qt_ldadd += $(LIBBITCOIN_CLI) $(LIBBITCOIN_COMMON) $(LIBBITCOIN_UTIL) $(LIBBITCOIN_CONSENSUS) $(LIBBITCOIN_CRYPTO) $(LIBUNIVALUE) $(LIBLEVELDB) $(LIBMEMENV) \
-  $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(MINIUPNPC_LIBS) $(NATPMP_LIBS) \
+  $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) \
   $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(SQLITE_LIBS) $(SODIUM_LIBS)
 bitcoin_qt_ldflags = $(RELDFLAGS) $(AM_LDFLAGS) $(QT_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) $(PTHREAD_FLAGS)
 bitcoin_qt_libtoolflags = $(AM_LIBTOOLFLAGS) --tag CXX

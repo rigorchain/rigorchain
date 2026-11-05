@@ -19,6 +19,7 @@
 #ifdef ENABLE_WALLET
 #include <qt/test/addressbooktests.h>
 #include <qt/test/wallettests.h>
+#include <qt/test/dualitystatisticstests.h>
 #endif // ENABLE_WALLET
 
 #include <QApplication>
@@ -103,6 +104,11 @@ int main(int argc, char* argv[])
     num_test_failures += QTest::qExec(&test3);
 
 #ifdef ENABLE_WALLET
+    // Duality Statistics does not use the wallet model. Run it before the
+    // wallet and address-book suites so a later GUI fault cannot hide it.
+    DualityStatisticsTests duality_tests;
+    num_test_failures += QTest::qExec(&duality_tests);
+
     WalletTests test5(app.node());
     num_test_failures += QTest::qExec(&test5);
 

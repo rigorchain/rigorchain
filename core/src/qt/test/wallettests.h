@@ -21,6 +21,7 @@ class WalletTests : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    void convergenceDisclaimerTests();
     void walletTests();
     void convergenceClickTests();
 };

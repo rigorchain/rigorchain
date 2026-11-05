@@ -73,6 +73,7 @@ public Q_SLOTS:
     void gotoHistoryPage();
     /** Switch to convergence page */
     void gotoConvergencePage();
+    void gotoDualityStatisticsPage();
     /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */

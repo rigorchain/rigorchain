@@ -827,6 +827,14 @@ Signing is only possible with addresses of the type 'legacy'.</source>
         <source>Original message:</source>
         <translation type="unfinished">原消息:</translation>
     </message>
+    <message>
+        <source>&amp;Duality Statistics</source>
+        <translation>雙資產統計(&amp;D)</translation>
+    </message>
+    <message>
+        <source>Duality Statistics: local ORU and RES figures from this node</source>
+        <translation>Duality Statistics: local ORU and RES figures from this node</translation>
+    </message>
 </context>
 <context>
     <name>UnitDisplayStatusBarControl</name>
@@ -3704,6 +3712,15 @@ Unable to restore backup of wallet.</source>
     <message>
         <source>Settings file could not be written</source>
         <translation type="unfinished">无法写入设置文件</translation>
+    </message>
+</context>
+<context>
+    <name>ConvergencePage</name>
+    <message>
+        <source>The wallet constructs the mint with a future confirmation-height safety margin so waiting to confirm does not void it.
+Destroyed ORU cannot be recovered.</source>
+        <translation>錢包使用未來確認高度安全餘量構造交易，避免因等待確認導致失效。
+已銷毀的 ORU 無法恢復。</translation>
     </message>
 </context>
 </TS>
