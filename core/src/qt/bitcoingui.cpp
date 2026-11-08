@@ -1140,6 +1140,8 @@ QString RigorGUI::networkStatusPlain() const
 
 void RigorGUI::updateNetworkState()
 {
+    if (!clientModel) return;
+
     int count = clientModel->getNumConnections();
     QString icon;
     switch(count)

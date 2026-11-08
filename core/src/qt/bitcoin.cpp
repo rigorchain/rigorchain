@@ -504,6 +504,12 @@ void BitcoinApplication::requestShutdown()
     // rescanning a wallet. Also wakes solo-miner GBT longpoll / HTTP workers
     // before setClientModel waits on in-flight RPC.
     node().startShutdown();
+    // Prior to unsetting the client model, stop listening backend signals.
+    // Otherwise a queued connection-count update calls updateNetworkState()
+    // after clientModel has been cleared.
+    if (clientModel) {
+        clientModel->stop();
+    }
     // Unsetting the client model can cause the current thread to wait for node
     // to complete an operation, like wait for a RPC execution to complete.
     window->setClientModel(nullptr);
