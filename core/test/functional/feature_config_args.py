@@ -197,7 +197,9 @@ class ConfArgsTest(BitcoinTestFramework):
                     "0 addresses found from DNS seeds",
                     "opencon thread start",  # Ensure ThreadOpenConnections::start time is properly set
                 ],
-                timeout=10,
+                # Service-bit and bare-name lookups both run before the summary
+                # line. Each negative answer waits on the system resolver.
+                timeout=35,
         ):
             self.start_node(0, extra_args=['-dnsseed=1', '-fixedseeds=1', f'-mocktime={start}'])
         with self.nodes[0].assert_debug_log(expected_msgs=[

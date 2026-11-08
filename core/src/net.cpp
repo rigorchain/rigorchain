@@ -8,6 +8,7 @@
 #endif
 
 #include <net.h>
+#include <net_dns_seed.h>
 
 #include <addrdb.h>
 #include <addrman.h>
@@ -1487,33 +1488,50 @@ void CConnman::ThreadDNSAddressSeed()
         }
 
         LogPrintf("Loading addresses from DNS seed %s\n", seed);
-        // If -proxy is in use, we make an ADDR_FETCH connection to the DNS resolved peer address
-        // for the base dns seed domain in chainparams
+        // A name-capable proxy resolves the seed itself. Keep that path on
+        // addr-fetch; do not change Tor or proxy behavior here.
         if (HaveNameProxy()) {
             AddAddrFetch(seed);
         } else {
-            std::vector<CNetAddr> vIPs;
-            std::vector<CAddress> vAdd;
-            ServiceFlags requiredServiceBits = GetDesirableServiceFlags(NODE_NONE);
-            std::string host = strprintf("x%x.%s", requiredServiceBits, seed);
-            CNetAddr resolveSource;
-            if (!resolveSource.SetInternal(host)) {
-                continue;
-            }
-            unsigned int nMaxIPs = 256; // Limits number of IPs learned from a DNS seed
-            if (LookupHost(host, vIPs, nMaxIPs, true)) {
-                for (const CNetAddr& ip : vIPs) {
-                    CAddress addr = CAddress(CService(ip, Params().GetDefaultPort()), requiredServiceBits);
-                    addr.nTime = rng.rand_uniform_delay(Now<NodeSeconds>() - 3 * 24h, -4 * 24h); // use a random age between 3 and 7 days old
-                    vAdd.push_back(addr);
-                    found++;
-                }
-                addrman.Add(vAdd, resolveSource);
-            } else {
-                // If the seed does not support a subdomain with our desired service bits,
-                // we make an ADDR_FETCH connection to the DNS resolved peer address for the
-                // base dns seed domain in chainparams
+            const ServiceFlags requiredServiceBits = GetDesirableServiceFlags(NODE_NONE);
+            const std::string service_host = strprintf("x%x.%s", requiredServiceBits, seed);
+            constexpr unsigned int nMaxIPs = 256;
+            std::vector<CNetAddr> service_ips;
+            std::vector<CNetAddr> bare_ips;
+            // LookupHost returns false for both NXDOMAIN and an empty answer.
+            // An empty vector is the only failure signal, so one path cannot
+            // erase addresses learned from the other.
+            if (interruptNet) return;
+            LookupHost(service_host, service_ips, nMaxIPs, true);
+            if (interruptNet) return;
+            LookupHost(seed, bare_ips, nMaxIPs, true);
+            if (interruptNet) return;
+
+            // Drop addresses AddrMan would reject before choosing a path.
+            // Otherwise an unroutable service-bit answer would hide a usable
+            // bare-name answer: ResolveDnsSeedImport prefers any non-empty
+            // service-bit list and does not itself test routability.
+            const auto not_routable = [](const CNetAddr& ip) { return !ip.IsRoutable(); };
+            service_ips.erase(std::remove_if(service_ips.begin(), service_ips.end(), not_routable), service_ips.end());
+            bare_ips.erase(std::remove_if(bare_ips.begin(), bare_ips.end(), not_routable), bare_ips.end());
+
+            const DnsSeedImport imported = ResolveDnsSeedImport(service_ips, bare_ips, Params().GetDefaultPort(), requiredServiceBits);
+            if (imported.addresses.empty()) {
+                LogPrintf("No usable addresses from DNS seed %s; falling back to addr-fetch\n", seed);
                 AddAddrFetch(seed);
+            } else {
+                const char* via = imported.kind == DnsSeedLookupKind::BARE_NAME ? "bare-name" : "service-bit";
+                CNetAddr resolveSource;
+                resolveSource.SetInternal(imported.kind == DnsSeedLookupKind::BARE_NAME ? seed : service_host);
+                std::vector<CAddress> usable = imported.addresses;
+                for (CAddress& addr : usable) {
+                    addr.nTime = rng.rand_uniform_delay(Now<NodeSeconds>() - 3 * 24h, -4 * 24h);
+                }
+                const int before = addrman.Size();
+                addrman.Add(usable, resolveSource);
+                const int added = addrman.Size() - before;
+                found += added;
+                LogPrintf("Imported %d addresses from DNS seed %s via %s\n", added, seed, via);
             }
         }
         --seeds_right_now;
