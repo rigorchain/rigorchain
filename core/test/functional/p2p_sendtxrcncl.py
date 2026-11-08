@@ -34,6 +34,10 @@ class SendTxRcnclTest(BitcoinTestFramework):
         self.extra_args = [['-txreconciliation']]
 
     def run_test(self):
+        self.log.info('Reserved -txreconciliation flag does not enable BIP330 relay')
+        debug_log = self.nodes[0].debug_log_path.read_text(encoding='utf-8')
+        assert "BIP330 set reconciliation is not implemented; transaction announcements remain on INV. Retaining the local transaction reconciliation tracker for future salt-transfer support only." in debug_log
+
         self.log.info('Node does not send SENDTXRCNCL (capability-driven handshake only)')
         peer = self.nodes[0].add_p2p_connection(SendTxrcnclReceiver())
         assert peer.sendtxrcncl_msg_received is None

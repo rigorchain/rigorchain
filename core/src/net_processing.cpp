@@ -1879,9 +1879,13 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_mempool(pool),
       m_ignore_incoming_txs(ignore_incoming_txs)
 {
-    // While Erlay support is incomplete, it must be enabled explicitly via -txreconciliation.
-    // This argument can go away after Erlay support is complete.
+    // BIP330 set reconciliation is not implemented. Upstream Bitcoin Core has not
+    // merged the sketch exchange (tracking issue #30249; draft PR #35591 is not
+    // for merge). -txreconciliation must not advertise or negotiate sendtxrcncl.
+    // The tracker is retained only so a future salt transport can attach here.
+    // It is not reached from the wire: inbound sendtxrcncl is disconnected.
     if (gArgs.GetBoolArg("-txreconciliation", DEFAULT_TXRECONCILIATION_ENABLE)) {
+        LogPrintf("BIP330 set reconciliation is not implemented; transaction announcements remain on INV. Retaining the local transaction reconciliation tracker for future salt-transfer support only.\n");
         m_txreconciliation = std::make_unique<TxReconciliationTracker>(TXRECONCILIATION_VERSION);
     }
 }
