@@ -61,10 +61,10 @@ bool warningWord(const QString& text)
     return text == kStale || text == kRebuilding;
 }
 
-QLabel* styledLabel(QWidget* parent, const QString& text, int pixel_size, bool bold, const QColor& color, Qt::Alignment alignment)
+QLabel* styledLabel(QWidget* parent, const QString& text, int pixel_size, bool bold, const QColor& color, Qt::Alignment alignment, bool word_wrap = true)
 {
     auto* label = new QLabel(text, parent);
-    label->setWordWrap(true);
+    label->setWordWrap(word_wrap);
     label->setAlignment(alignment);
     label->setTextInteractionFlags(Qt::TextSelectableByMouse);
     label->setStyleSheet(QStringLiteral("color: %1; background: transparent; font-size: %2px; font-weight: %3;")
@@ -95,12 +95,16 @@ QFrame* makeCard(QWidget* parent, const QString& frame_name, const QString& titl
     auto* layout = new QVBoxLayout(frame);
     layout->setContentsMargins(space.cardPadding, space.cardPadding, space.cardPadding, space.cardPadding);
     layout->setSpacing(space.unit / 2);
-    QLabel* title_label = styledLabel(frame, title, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop);
+    QLabel* title_label = styledLabel(frame, title, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop, true);
     title_label->setObjectName(title_name);
-    auto* value = styledLabel(frame, kNA, type.balancePx, true, colors.textPrimary, Qt::AlignRight | Qt::AlignVCenter);
+    // Amounts stay on one line. The U+2009 thousands separator is a line break,
+    // and a word-wrapped label on a wide card keeps an extra line of height for
+    // amounts that contain it. Amounts without a separator then sit lower.
+    auto* value = styledLabel(frame, kNA, type.balancePx, true, colors.textPrimary, Qt::AlignRight | Qt::AlignVCenter, false);
     value->setObjectName(value_name);
-    QLabel* unit_label = styledLabel(frame, unit, type.labelPx, false, colors.textMuted, Qt::AlignRight | Qt::AlignVCenter);
-    QLabel* meaning_label = styledLabel(frame, meaning, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop);
+    value->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    QLabel* unit_label = styledLabel(frame, unit, type.labelPx, false, colors.textMuted, Qt::AlignRight | Qt::AlignVCenter, false);
+    QLabel* meaning_label = styledLabel(frame, meaning, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop, true);
     layout->addWidget(title_label);
     layout->addStretch();
     layout->addWidget(value);

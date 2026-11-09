@@ -213,6 +213,44 @@ void DualityStatisticsTests::layoutReflowsWithWindowWidth()
     page.hide();
 }
 
+void DualityStatisticsTests::wideCardsKeepAmountBaselinesLevel()
+{
+    DualityStatisticsPage page;
+    page.resize(3200, 900);
+    page.show();
+
+    EconomicsSnapshot snapshot = authoritativeSample();
+    snapshot.amounts.subsidy = 388480 * COIN;
+    snapshot.amounts.subsidy_available = true;
+    snapshot.amounts.fee_burn = 1210;
+    snapshot.amounts.fee_burn_available = true;
+    snapshot.amounts.res_supply = 35 * COIN + 92474757;
+    snapshot.amounts.res_supply_available = true;
+    page.applySnapshot(snapshot);
+
+    QLabel* grouped = label(page, "oruScheduleValue");
+    QLabel* plain = label(page, "oruFeeValue");
+    QLabel* res_plain = label(page, "resSupplyValue");
+    QLabel* res_grouped = label(page, "resRemainingValue");
+    QVERIFY(grouped->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(!plain->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(plain->text().startsWith(QStringLiteral("0.00001210")));
+    QVERIFY(!res_plain->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(res_grouped->text().contains(QChar(THIN_SP_CP)));
+    for (QLabel* amount : {grouped, plain, res_plain, res_grouped}) {
+        QVERIFY(!amount->wordWrap());
+        QCOMPARE(amount->sizePolicy().verticalPolicy(), QSizePolicy::Fixed);
+    }
+
+    auto top = [&](QLabel* amount) { return amount->mapTo(&page, QPoint(0, 0)).y(); };
+    QVERIFY(QTest::qWaitFor([&] {
+        return top(grouped) > 0 && grouped->height() > 12 && qAbs(top(grouped) - top(plain)) < 2 &&
+               qAbs(top(res_plain) - top(res_grouped)) < 2 && grouped->height() == plain->height() &&
+               res_plain->height() == res_grouped->height();
+    }, 1000));
+    page.hide();
+}
+
 void DualityStatisticsTests::iconIsTransparentOverviewStyle()
 {
     const QImage image(QStringLiteral(":/icons/duality_statistics"));

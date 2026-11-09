@@ -16,6 +16,7 @@ private Q_SLOTS:
     void disabledIndexDoesNotShowZero();
     void snapshotValuesAndStaleRetention();
     void layoutReflowsWithWindowWidth();
+    void wideCardsKeepAmountBaselinesLevel();
     void iconIsTransparentOverviewStyle();
     void chineseCatalogsTranslateTheNewLabels();
 };
