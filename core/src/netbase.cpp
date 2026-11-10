@@ -40,32 +40,10 @@ bool fNameLookup = DEFAULT_NAME_LOOKUP;
 int g_socks5_recv_timeout = 20 * 1000;
 static std::atomic<bool> interruptSocks5Recv(false);
 
-std::vector<CNetAddr> WrappedGetAddrInfo(const std::string& name, bool allow_lookup)
+static std::vector<CNetAddr> AddressesFromAddrInfo(addrinfo* ai_res)
 {
-    addrinfo ai_hint{};
-    // We want a TCP port, which is a streaming socket type
-    ai_hint.ai_socktype = SOCK_STREAM;
-    ai_hint.ai_protocol = IPPROTO_TCP;
-    // We don't care which address family (IPv4 or IPv6) is returned
-    ai_hint.ai_family = AF_UNSPEC;
-    // If we allow lookups of hostnames, use the AI_ADDRCONFIG flag to only
-    // return addresses whose family we have an address configured for.
-    //
-    // If we don't allow lookups, then use the AI_NUMERICHOST flag for
-    // getaddrinfo to only decode numerical network addresses and suppress
-    // hostname lookups.
-    ai_hint.ai_flags = allow_lookup ? AI_ADDRCONFIG : AI_NUMERICHOST;
-
-    addrinfo* ai_res{nullptr};
-    const int n_err{getaddrinfo(name.c_str(), nullptr, &ai_hint, &ai_res)};
-    if (n_err != 0) {
-        return {};
-    }
-
-    // Traverse the linked list starting with ai_trav.
-    addrinfo* ai_trav{ai_res};
     std::vector<CNetAddr> resolved_addresses;
-    while (ai_trav != nullptr) {
+    for (addrinfo* ai_trav = ai_res; ai_trav != nullptr; ai_trav = ai_trav->ai_next) {
         if (ai_trav->ai_family == AF_INET) {
             assert(ai_trav->ai_addrlen >= sizeof(sockaddr_in));
             resolved_addresses.emplace_back(reinterpret_cast<sockaddr_in*>(ai_trav->ai_addr)->sin_addr);
@@ -75,11 +53,51 @@ std::vector<CNetAddr> WrappedGetAddrInfo(const std::string& name, bool allow_loo
             const sockaddr_in6* s6{reinterpret_cast<sockaddr_in6*>(ai_trav->ai_addr)};
             resolved_addresses.emplace_back(s6->sin6_addr, s6->sin6_scope_id);
         }
-        ai_trav = ai_trav->ai_next;
     }
-    freeaddrinfo(ai_res);
-
     return resolved_addresses;
+}
+
+std::vector<CNetAddr> LookupWithAddrConfigFallback(bool allow_lookup, const std::function<AddrInfoAttempt(int ai_flags)>& query)
+{
+    // Hostname lookups ask for addresses of families this host has configured.
+    // Numeric lookups only decode the literal and never retry as a name.
+    const int flags = allow_lookup ? AI_ADDRCONFIG : AI_NUMERICHOST;
+    const AddrInfoAttempt first = query(flags);
+    if (first.error == 0) {
+        return first.addresses;
+    }
+    // Bitcoin Core v32.1 commit 23333b7ed: some systems ignore loopback-only
+    // IPv6 for AI_ADDRCONFIG and then fail the lookup. Retry once without the
+    // flag. Any other failure, including a failed retry, stays a failure.
+    if ((flags & AI_ADDRCONFIG) == AI_ADDRCONFIG) {
+        const AddrInfoAttempt second = query(flags & ~AI_ADDRCONFIG);
+        if (second.error == 0) {
+            return second.addresses;
+        }
+    }
+    return {};
+}
+
+std::vector<CNetAddr> WrappedGetAddrInfo(const std::string& name, bool allow_lookup)
+{
+    return LookupWithAddrConfigFallback(allow_lookup, [&](int ai_flags) {
+        addrinfo ai_hint{};
+        // We want a TCP port, which is a streaming socket type
+        ai_hint.ai_socktype = SOCK_STREAM;
+        ai_hint.ai_protocol = IPPROTO_TCP;
+        // We don't care which address family (IPv4 or IPv6) is returned
+        ai_hint.ai_family = AF_UNSPEC;
+        ai_hint.ai_flags = ai_flags;
+
+        addrinfo* ai_res{nullptr};
+        const int n_err{getaddrinfo(name.c_str(), nullptr, &ai_hint, &ai_res)};
+        if (n_err != 0) {
+            return AddrInfoAttempt{n_err, {}};
+        }
+        AddrInfoAttempt attempt{0, AddressesFromAddrInfo(ai_res)};
+        freeaddrinfo(ai_res);
+        return attempt;
+    });
 }
 
 DNSLookupFn g_dns_lookup{WrappedGetAddrInfo};

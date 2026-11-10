@@ -65,6 +65,9 @@ BOOST_AUTO_TEST_CASE(netbase_properties)
     BOOST_CHECK(ResolveIP("198.18.0.0").IsRFC2544());
     BOOST_CHECK(ResolveIP("198.19.255.255").IsRFC2544());
     BOOST_CHECK(ResolveIP("2001:0DB8::").IsRFC3849());
+    BOOST_CHECK(ResolveIP("3FFF::").IsRFC9637());
+    BOOST_CHECK(ResolveIP("3FFF:0FFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF").IsRFC9637());
+    BOOST_CHECK(!ResolveIP("3FFF:1000::").IsRFC9637());
     BOOST_CHECK(ResolveIP("169.254.1.1").IsRFC3927());
     BOOST_CHECK(ResolveIP("2002::1").IsRFC3964());
     BOOST_CHECK(ResolveIP("FC00::").IsRFC4193());
@@ -79,6 +82,7 @@ BOOST_AUTO_TEST_CASE(netbase_properties)
     BOOST_CHECK(ResolveIP("8.8.8.8").IsRoutable());
     BOOST_CHECK(ResolveIP("2001::1").IsRoutable());
     BOOST_CHECK(ResolveIP("127.0.0.1").IsValid());
+    BOOST_CHECK(!ResolveIP("3FFF::").IsValid());
     BOOST_CHECK(CreateInternal("FD6B:88C0:8724:edb1:8e4:3588:e546:35ca").IsInternal());
     BOOST_CHECK(CreateInternal("bar.com").IsInternal());
 
@@ -613,6 +617,216 @@ BOOST_AUTO_TEST_CASE(isbadport)
         }
     }
     BOOST_CHECK_EQUAL(total_bad_ports, 85);
+}
+
+BOOST_AUTO_TEST_CASE(netbase_rfc9637_documentation_prefix)
+{
+    const CNetAddr first = ResolveIP("3fff::");
+    const CNetAddr last = ResolveIP("3fff:0fff:ffff:ffff:ffff:ffff:ffff:ffff");
+    const CNetAddr just_after = ResolveIP("3fff:1000::");
+    const CNetAddr just_before = ResolveIP("3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff");
+    const CNetAddr rfc3849 = ResolveIP("2001:db8::");
+    const CNetAddr rfc3849_last = ResolveIP("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff");
+    const CNetAddr outside_3849 = ResolveIP("2001:db9::");
+    const CNetAddr loopback = ResolveIP("::1");
+    const CNetAddr link_local = ResolveIP("fe80::1");
+    const CNetAddr global = ResolveIP("2001:4860:4860::8888");
+    const CNetAddr unique_local = ResolveIP("fc00::");
+    const CNetAddr sixto4 = ResolveIP("2002::1");
+    const CNetAddr teredo = ResolveIP("2001::2");
+    const CNetAddr nat64 = ResolveIP("64:ff9b::");
+    const CNetAddr ipv4 = ResolveIP("8.8.8.8");
+
+    for (const CNetAddr& doc : {first, last}) {
+        BOOST_CHECK(doc.IsIPv6());
+        BOOST_CHECK(doc.IsRFC9637());
+        BOOST_CHECK(!doc.IsRFC3849());
+        BOOST_CHECK(!doc.IsValid());
+        BOOST_CHECK(!doc.IsRoutable());
+        BOOST_CHECK(!doc.IsLocal());
+        BOOST_CHECK(doc.GetNetwork() == NET_UNROUTABLE);
+        BOOST_CHECK(doc.IsAddrV1Compatible());
+    }
+
+    BOOST_CHECK(!just_after.IsRFC9637());
+    BOOST_CHECK(just_after.IsValid());
+    BOOST_CHECK(just_after.IsRoutable());
+    BOOST_CHECK(just_after.IsIPv6());
+    BOOST_CHECK(just_after.GetNetwork() == NET_IPV6);
+
+    BOOST_CHECK(!just_before.IsRFC9637());
+    BOOST_CHECK(just_before.IsValid());
+    BOOST_CHECK(just_before.IsRoutable());
+    BOOST_CHECK(just_before.GetNetwork() == NET_IPV6);
+
+    BOOST_CHECK(rfc3849.IsRFC3849());
+    BOOST_CHECK(rfc3849_last.IsRFC3849());
+    BOOST_CHECK(!rfc3849.IsRFC9637());
+    BOOST_CHECK(!rfc3849.IsValid());
+    BOOST_CHECK(!rfc3849.IsRoutable());
+    BOOST_CHECK(!outside_3849.IsRFC3849());
+    BOOST_CHECK(!outside_3849.IsRFC9637());
+    BOOST_CHECK(outside_3849.IsRoutable());
+
+    BOOST_CHECK(loopback.IsIPv6());
+    BOOST_CHECK(loopback.IsLocal());
+    BOOST_CHECK(loopback.IsValid());
+    BOOST_CHECK(!loopback.IsRoutable());
+    BOOST_CHECK(!loopback.IsRFC9637());
+    BOOST_CHECK(loopback.GetNetwork() == NET_UNROUTABLE);
+
+    BOOST_CHECK(link_local.IsRFC4862());
+    BOOST_CHECK(link_local.IsValid());
+    BOOST_CHECK(!link_local.IsRoutable());
+    BOOST_CHECK(!link_local.IsRFC9637());
+
+    BOOST_CHECK(global.IsIPv6());
+    BOOST_CHECK(global.IsValid());
+    BOOST_CHECK(global.IsRoutable());
+    BOOST_CHECK(!global.IsRFC9637());
+    BOOST_CHECK(!global.IsRFC3849());
+    BOOST_CHECK(global.GetNetwork() == NET_IPV6);
+
+    BOOST_CHECK(unique_local.IsRFC4193());
+    BOOST_CHECK(!unique_local.IsRoutable());
+    BOOST_CHECK(!unique_local.IsRFC9637());
+    BOOST_CHECK(sixto4.IsRFC3964());
+    BOOST_CHECK(sixto4.IsRoutable());
+    BOOST_CHECK(teredo.IsRFC4380());
+    BOOST_CHECK(teredo.IsRoutable());
+    BOOST_CHECK(nat64.IsRFC6052());
+    BOOST_CHECK(nat64.IsValid());
+    BOOST_CHECK(!nat64.IsRFC9637());
+    BOOST_CHECK(ipv4.IsIPv4());
+    BOOST_CHECK(!ipv4.IsRFC9637());
+    BOOST_CHECK(ipv4.IsRoutable());
+
+    // ADDRv2 network id for IPv6 stays 2. Invalid documentation addresses are
+    // still IPv6 values; validity is a separate check from serialization.
+    // Layout: uint32 time 100000000, compactsize services 0, network id 2, length 16.
+    const std::string addrv2_ipv6_prefix = "00e1f505000210";
+    CDataStream global_stream(SER_NETWORK, PROTOCOL_VERSION | ADDRV2_FORMAT);
+    global_stream << CAddress(CService(global, 8760), NODE_NONE);
+    CDataStream doc_stream(SER_NETWORK, PROTOCOL_VERSION | ADDRV2_FORMAT);
+    doc_stream << CAddress(CService(first, 8760), NODE_NONE);
+    BOOST_CHECK_EQUAL(HexStr(global_stream).substr(0, addrv2_ipv6_prefix.size()), addrv2_ipv6_prefix);
+    BOOST_CHECK_EQUAL(HexStr(doc_stream).substr(0, addrv2_ipv6_prefix.size()), addrv2_ipv6_prefix);
+}
+
+BOOST_AUTO_TEST_CASE(netbase_addrconfig_fallback)
+{
+    constexpr int kFailed = 1;
+    const CNetAddr ipv4 = ResolveIP("192.0.2.1");
+    const CNetAddr ipv6 = ResolveIP("2001:4860:4860::8888");
+    BOOST_REQUIRE(ipv4.IsIPv4());
+    BOOST_REQUIRE(ipv6.IsIPv6());
+
+    {
+        int calls = 0;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(true, [&](int flags) {
+            ++calls;
+            BOOST_CHECK((flags & AI_ADDRCONFIG) == AI_ADDRCONFIG);
+            return AddrInfoAttempt{0, {ipv4}};
+        });
+        BOOST_CHECK_EQUAL(calls, 1);
+        BOOST_REQUIRE_EQUAL(got.size(), 1U);
+        BOOST_CHECK(got[0] == ipv4);
+        BOOST_CHECK(got[0].IsIPv4());
+    }
+
+    {
+        int calls = 0;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(true, [&](int flags) {
+            ++calls;
+            BOOST_CHECK((flags & AI_ADDRCONFIG) == AI_ADDRCONFIG);
+            return AddrInfoAttempt{0, {ipv6}};
+        });
+        BOOST_CHECK_EQUAL(calls, 1);
+        BOOST_REQUIRE_EQUAL(got.size(), 1U);
+        BOOST_CHECK(got[0] == ipv6);
+        BOOST_CHECK(got[0].IsIPv6());
+    }
+
+    {
+        // IPv4-only configured host: AI_ADDRCONFIG succeeds and returns A only.
+        int calls = 0;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(true, [&](int flags) {
+            ++calls;
+            BOOST_CHECK((flags & AI_ADDRCONFIG) == AI_ADDRCONFIG);
+            return AddrInfoAttempt{0, {ipv4}};
+        });
+        BOOST_CHECK_EQUAL(calls, 1);
+        BOOST_REQUIRE_EQUAL(got.size(), 1U);
+        BOOST_CHECK(got[0].IsIPv4());
+        BOOST_CHECK(!got[0].IsIPv6());
+    }
+
+    {
+        // No usable global IPv6: the flagged lookup fails and the retry returns both families.
+        std::vector<int> seen;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(true, [&](int flags) {
+            seen.push_back(flags);
+            if ((flags & AI_ADDRCONFIG) == AI_ADDRCONFIG) {
+                return AddrInfoAttempt{kFailed, {ipv4}};
+            }
+            return AddrInfoAttempt{0, {ipv4, ipv6}};
+        });
+        BOOST_REQUIRE_EQUAL(seen.size(), 2U);
+        BOOST_CHECK((seen[0] & AI_ADDRCONFIG) == AI_ADDRCONFIG);
+        BOOST_CHECK((seen[1] & AI_ADDRCONFIG) == 0);
+        BOOST_REQUIRE_EQUAL(got.size(), 2U);
+        BOOST_CHECK(got[0].IsIPv4());
+        BOOST_CHECK(got[1].IsIPv6());
+    }
+
+    {
+        std::vector<int> seen;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(true, [&](int flags) {
+            seen.push_back(flags);
+            return AddrInfoAttempt{kFailed, {}};
+        });
+        BOOST_CHECK_EQUAL(seen.size(), 2U);
+        BOOST_CHECK((seen[0] & AI_ADDRCONFIG) == AI_ADDRCONFIG);
+        BOOST_CHECK((seen[1] & AI_ADDRCONFIG) == 0);
+        BOOST_CHECK(got.empty());
+    }
+
+    {
+        // Numeric parsing must not turn a failure into a second, non-numeric lookup.
+        int calls = 0;
+        const std::vector<CNetAddr> got = LookupWithAddrConfigFallback(false, [&](int flags) {
+            ++calls;
+            BOOST_CHECK((flags & AI_NUMERICHOST) == AI_NUMERICHOST);
+            BOOST_CHECK((flags & AI_ADDRCONFIG) == 0);
+            return AddrInfoAttempt{kFailed, {ipv4}};
+        });
+        BOOST_CHECK_EQUAL(calls, 1);
+        BOOST_CHECK(got.empty());
+    }
+
+    // Real getaddrinfo on numeric literals. No public DNS.
+    const std::vector<CNetAddr> real_v4 = WrappedGetAddrInfo("192.0.2.1", true);
+    BOOST_REQUIRE_EQUAL(real_v4.size(), 1U);
+    BOOST_CHECK(real_v4[0].IsIPv4());
+    BOOST_CHECK_EQUAL(real_v4[0].ToStringAddr(), "192.0.2.1");
+
+    const std::vector<CNetAddr> real_v6 = WrappedGetAddrInfo("2001:db8::1", true);
+    BOOST_REQUIRE_EQUAL(real_v6.size(), 1U);
+    BOOST_CHECK(real_v6[0].IsIPv6());
+    BOOST_CHECK_EQUAL(real_v6[0].ToStringAddr(), "2001:db8::1");
+
+    const std::vector<CNetAddr> real_loopback = WrappedGetAddrInfo("::1", false);
+    BOOST_REQUIRE_EQUAL(real_loopback.size(), 1U);
+    BOOST_CHECK(real_loopback[0].IsLocal());
+
+    BOOST_CHECK(WrappedGetAddrInfo("not a literal", false).empty());
+    CNetAddr ipv4_check;
+    BOOST_CHECK(LookupHost("192.0.2.1", ipv4_check, false));
+    BOOST_CHECK(ipv4_check.IsIPv4());
+    CNetAddr ipv6_check;
+    BOOST_CHECK(LookupHost("2001:4860:4860::8888", ipv6_check, false));
+    BOOST_CHECK(ipv6_check.IsIPv6());
+    BOOST_CHECK(ipv6_check.IsRoutable());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

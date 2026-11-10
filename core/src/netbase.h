@@ -69,6 +69,21 @@ struct ProxyCredentials
  */
 std::vector<CNetAddr> WrappedGetAddrInfo(const std::string& name, bool allow_lookup);
 
+/** One getaddrinfo-style attempt. error == 0 means the operating system returned a result. */
+struct AddrInfoAttempt {
+    int error{0};
+    std::vector<CNetAddr> addresses;
+};
+
+/**
+ * Lookup policy for WrappedGetAddrInfo.
+ * A hostname lookup (allow_lookup) uses AI_ADDRCONFIG. If that attempt fails,
+ * exactly one retry is made without AI_ADDRCONFIG. A numeric lookup does not
+ * retry. If every attempt fails, the result is empty: a DNS failure stays a
+ * failure and is not reported as a successful lookup with no addresses.
+ */
+std::vector<CNetAddr> LookupWithAddrConfigFallback(bool allow_lookup, const std::function<AddrInfoAttempt(int ai_flags)>& query);
+
 enum Network ParseNetwork(const std::string& net);
 std::string GetNetworkName(enum Network net);
 /** Return a vector of publicly routable Network names; optionally append NET_UNROUTABLE. */

@@ -348,6 +348,14 @@ bool CNetAddr::IsRFC3849() const
     return IsIPv6() && HasPrefix(m_addr, std::array<uint8_t, 4>{0x20, 0x01, 0x0D, 0xB8});
 }
 
+bool CNetAddr::IsRFC9637() const
+{
+    // RFC 9637 documentation prefix 3fff::/20. Same treatment as RFC 3849:
+    // the address stays an IPv6 value, and IsValid() rejects it.
+    return IsIPv6() && HasPrefix(m_addr, std::array<uint8_t, 2>{0x3F, 0xFF}) &&
+           (m_addr[2] & 0xF0) == 0x00;
+}
+
 bool CNetAddr::IsRFC3964() const
 {
     return IsIPv6() && HasPrefix(m_addr, std::array<uint8_t, 2>{0x20, 0x02});
@@ -455,8 +463,8 @@ bool CNetAddr::IsValid() const
         return false;
     }
 
-    // documentation IPv6 address
-    if (IsRFC3849())
+    // documentation IPv6 address (RFC 3849 2001:db8::/32, RFC 9637 3fff::/20)
+    if (IsRFC3849() || IsRFC9637())
         return false;
 
     if (IsInternal())
