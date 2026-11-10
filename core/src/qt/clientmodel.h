@@ -91,6 +91,8 @@ public:
     QString blocksDir() const;
 
     bool getProxyInfo(std::string& ip_port) const;
+    QString torStatusSummary() const;
+    bool torStatusVisible() const;
 
     // caches for the best header: hash, number of blocks and block time
     mutable std::atomic<int> cachedBestHeaderHeight;
@@ -124,6 +126,8 @@ private:
     void FlushCoalescedTip(bool block_channel) EXCLUSIVE_LOCKS_REQUIRED(!m_tip_coalesce_mutex);
     void subscribeToCoreSignals();
     void unsubscribeFromCoreSignals();
+    void pollTorStatus();
+    QTimer* m_tor_status_timer{nullptr};
 
     Mutex m_tip_coalesce_mutex;
     TipNotifyCoalescer m_tip_coalescer GUARDED_BY(m_tip_coalesce_mutex);
@@ -133,6 +137,7 @@ Q_SIGNALS:
     void numBlocksChanged(int count, const QDateTime& blockDate, double nVerificationProgress, SyncType header, SynchronizationState sync_state);
     void mempoolSizeChanged(long count, size_t mempoolSizeInBytes);
     void networkActiveChanged(bool networkActive);
+    void torStatusChanged();
     void alertsChanged(const QString &warnings);
     void bytesChanged(quint64 totalBytesIn, quint64 totalBytesOut);
 

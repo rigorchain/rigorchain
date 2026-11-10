@@ -381,6 +381,38 @@ static std::string Socks5ErrorString(uint8_t err)
     }
 }
 
+Socks5GreetingResult Socks5Greeting(const Sock& sock, const ProxyCredentials* auth, int timeout_ms)
+{
+    Socks5GreetingResult result;
+    std::vector<uint8_t> greeting;
+    greeting.push_back(SOCKSVersion::SOCKS5);
+    if (auth) {
+        greeting.push_back(0x02);
+        greeting.push_back(SOCKS5Method::NOAUTH);
+        greeting.push_back(SOCKS5Method::USER_PASS);
+    } else {
+        greeting.push_back(0x01);
+        greeting.push_back(SOCKS5Method::NOAUTH);
+    }
+    const ssize_t sent = sock.Send(greeting.data(), greeting.size(), MSG_NOSIGNAL);
+    if (sent != static_cast<ssize_t>(greeting.size())) {
+        result.send_failed = true;
+        return result;
+    }
+    uint8_t reply[2];
+    if (InterruptibleRecv(reply, 2, timeout_ms, sock) != IntrRecvError::OK) {
+        result.io_failed = true;
+        return result;
+    }
+    if (reply[0] != SOCKSVersion::SOCKS5) {
+        result.version_rejected = true;
+        return result;
+    }
+    result.method = reply[1];
+    result.ok = true;
+    return result;
+}
+
 bool Socks5(const std::string& strDest, uint16_t port, const ProxyCredentials* auth, const Sock& sock)
 {
     IntrRecvError recvr;
@@ -388,30 +420,19 @@ bool Socks5(const std::string& strDest, uint16_t port, const ProxyCredentials* a
     if (strDest.size() > 255) {
         return error("Hostname too long");
     }
-    // Construct the version identifier/method selection message
-    std::vector<uint8_t> vSocks5Init;
-    vSocks5Init.push_back(SOCKSVersion::SOCKS5); // We want the SOCK5 protocol
-    if (auth) {
-        vSocks5Init.push_back(0x02); // 2 method identifiers follow...
-        vSocks5Init.push_back(SOCKS5Method::NOAUTH);
-        vSocks5Init.push_back(SOCKS5Method::USER_PASS);
-    } else {
-        vSocks5Init.push_back(0x01); // 1 method identifier follows...
-        vSocks5Init.push_back(SOCKS5Method::NOAUTH);
-    }
-    ssize_t ret = sock.Send(vSocks5Init.data(), vSocks5Init.size(), MSG_NOSIGNAL);
-    if (ret != (ssize_t)vSocks5Init.size()) {
-        return error("Error sending to proxy");
-    }
-    uint8_t pchRet1[2];
-    if (InterruptibleRecv(pchRet1, 2, g_socks5_recv_timeout, sock) != IntrRecvError::OK) {
+    const Socks5GreetingResult greeting = Socks5Greeting(sock, auth, g_socks5_recv_timeout);
+    if (!greeting.ok) {
+        if (greeting.send_failed) {
+            return error("Error sending to proxy");
+        }
+        if (greeting.version_rejected) {
+            return error("Proxy failed to initialize");
+        }
         LogPrintf("Socks5() connect to %s:%d failed: InterruptibleRecv() timeout or other failure\n", strDest, port);
         return false;
     }
-    if (pchRet1[0] != SOCKSVersion::SOCKS5) {
-        return error("Proxy failed to initialize");
-    }
-    if (pchRet1[1] == SOCKS5Method::USER_PASS && auth) {
+    ssize_t ret = 0;
+    if (greeting.method == SOCKS5Method::USER_PASS && auth) {
         // Perform username/password authentication (as described in RFC1929)
         std::vector<uint8_t> vAuth;
         vAuth.push_back(0x01); // Current (and only) version of user/pass subnegotiation
@@ -433,10 +454,10 @@ bool Socks5(const std::string& strDest, uint16_t port, const ProxyCredentials* a
         if (pchRetA[0] != 0x01 || pchRetA[1] != 0x00) {
             return error("Proxy authentication unsuccessful");
         }
-    } else if (pchRet1[1] == SOCKS5Method::NOAUTH) {
+    } else if (greeting.method == SOCKS5Method::NOAUTH) {
         // Perform no authentication
     } else {
-        return error("Proxy requested wrong authentication method %02x", pchRet1[1]);
+        return error("Proxy requested wrong authentication method %02x", greeting.method);
     }
     std::vector<uint8_t> vSocks5;
     vSocks5.push_back(SOCKSVersion::SOCKS5); // VER protocol version

@@ -189,6 +189,9 @@ RigorGUI::RigorGUI(interfaces::Node& node, const PlatformStyle *_platformStyle, 
         labelWalletHDStatusIcon->hide();
     }
     frameBlocksLayout->addWidget(labelProxyIcon);
+    labelTorStatus = new QLabel();
+    labelTorStatus->setVisible(false);
+    frameBlocksLayout->addWidget(labelTorStatus);
     frameBlocksLayout->addStretch();
     frameBlocksLayout->addWidget(connectionsControl);
     frameBlocksLayout->addStretch();
@@ -691,6 +694,8 @@ void RigorGUI::setClientModel(ClientModel *_clientModel, interfaces::BlockAndHea
         rpcConsole->setClientModel(_clientModel, tip_info->block_height, tip_info->block_time, tip_info->verification_progress);
 
         updateProxyIcon();
+        connect(_clientModel, &ClientModel::torStatusChanged, this, &RigorGUI::updateTorStatus);
+        updateTorStatus();
 
 #ifdef ENABLE_WALLET
         if(walletFrame)
@@ -711,6 +716,7 @@ void RigorGUI::setClientModel(ClientModel *_clientModel, interfaces::BlockAndHea
 
         m_mask_values_action->setChecked(_clientModel->getOptionsModel()->getOption(OptionsModel::OptionID::MaskValues).toBool());
     } else {
+        updateTorStatus();
         if(trayIconMenu)
         {
             // Disable context menu on tray icon
@@ -1135,6 +1141,12 @@ QString RigorGUI::networkStatusPlain() const
         }
     }
     lines << tr("A seed name is shown as Connected only while a live peer uses that name's current address. Both seeds are not guaranteed to stay connected.");
+    if (RunningTorNetworkMode() != TorNetworkMode::Normal) {
+        const TorServiceStatus tor_status = GetTorServiceStatus();
+        lines << tr("Onion peers: inbound %1, outbound %2. This is separate from the connection icon.")
+                    .arg(tor_status.onion_peers_in)
+                    .arg(tor_status.onion_peers_out);
+    }
     return lines.join(QLatin1Char('\n'));
 }
 
@@ -1600,6 +1612,18 @@ void RigorGUI::updateWalletStatus()
                 walletModel->wallet().oruHdEnabled() || walletModel->wallet().resHdEnabled());
 }
 #endif // ENABLE_WALLET
+
+void RigorGUI::updateTorStatus()
+{
+    if (!labelTorStatus) return;
+    if (!clientModel || !clientModel->torStatusVisible()) {
+        labelTorStatus->clear();
+        labelTorStatus->setVisible(false);
+        return;
+    }
+    labelTorStatus->setVisible(true);
+    labelTorStatus->setText(clientModel->torStatusSummary());
+}
 
 void RigorGUI::updateProxyIcon()
 {

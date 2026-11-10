@@ -8,6 +8,7 @@
 #include <qt/bantablemodel.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
+#include <qt/optionsmodel.h>
 #include <qt/peertablemodel.h>
 #include <qt/peertablesortproxy.h>
 
@@ -17,6 +18,7 @@
 #include <interfaces/node.h>
 #include <net.h>
 #include <netbase.h>
+#include <torcontrol.h>
 #include <util/system.h>
 #include <util/threadnames.h>
 #include <util/time.h>
@@ -26,6 +28,7 @@
 
 #include <QDebug>
 #include <QMetaObject>
+#include <QStringList>
 #include <QThread>
 #include <QTimer>
 
@@ -48,6 +51,10 @@ ClientModel::ClientModel(interfaces::Node& node, OptionsModel *_optionsModel, QO
 
     peerTableModel = new PeerTableModel(m_node, this);
     m_peer_table_sort_proxy = new PeerTableSortProxy(this);
+    m_tor_status_timer = new QTimer(this);
+    connect(m_tor_status_timer, &QTimer::timeout, this, &ClientModel::pollTorStatus);
+    m_tor_status_timer->start(2000);
+    pollTorStatus();
     m_peer_table_sort_proxy->setSourceModel(peerTableModel);
 
     banTableModel = new BanTableModel(m_node, this);
@@ -74,10 +81,93 @@ ClientModel::ClientModel(interfaces::Node& node, OptionsModel *_optionsModel, QO
 
 void ClientModel::stop()
 {
+    if (m_tor_status_timer) m_tor_status_timer->stop();
     unsubscribeFromCoreSignals();
 
     m_thread->quit();
     m_thread->wait();
+}
+
+static QString TorModeName(TorNetworkMode mode)
+{
+    switch (mode) {
+    case TorNetworkMode::OutboundOnly: return QObject::tr("Tor outbound");
+    case TorNetworkMode::InboundOutbound: return QObject::tr("Tor inbound and outbound");
+    case TorNetworkMode::Dual: return QObject::tr("Dual network");
+    case TorNetworkMode::TorOnly: return QObject::tr("Tor only");
+    case TorNetworkMode::Normal: break;
+    }
+    return QObject::tr("Normal network");
+}
+
+void ClientModel::pollTorStatus()
+{
+    ProbeConfiguredSocksOnce();
+    interfaces::Node::NodesStats stats;
+    int onion_in = 0;
+    int onion_out = 0;
+    if (m_node.getNodesStats(stats)) {
+        for (const auto& row : stats) {
+            const CNodeStats& node_stats = std::get<0>(row);
+            if (node_stats.m_network != NET_ONION) continue;
+            if (node_stats.fInbound) ++onion_in;
+            else ++onion_out;
+        }
+    }
+    NoteTorPeerSnapshot(onion_in, onion_out, m_node.getNetworkActive());
+    Q_EMIT torStatusChanged();
+}
+
+QString ClientModel::torStatusSummary() const
+{
+    const TorServiceStatus status = GetTorServiceStatus();
+    const TorNetworkMode running = RunningTorNetworkMode();
+    const TorNetworkMode saved = optionsModel ? optionsModel->detectedTorNetworkMode() : TorNetworkMode::Normal;
+    if (saved != running) {
+        return tr("Tor settings saved (%1). Restart RIGORCHAIN to activate them. Running mode: %2.")
+            .arg(TorModeName(saved), TorModeName(running));
+    }
+    if (running == TorNetworkMode::Normal) return QString();
+    QStringList lines;
+    lines << tr("Running mode: %1.").arg(TorModeName(running));
+    if (status.identity_error) {
+        lines << QString::fromStdString(status.detail);
+    }
+    lines << (status.socks_handshake_ok ? tr("SOCKS5 greeting succeeded.") :
+              status.socks_reachable ? tr("SOCKS port accepted TCP, greeting failed.") :
+                                       tr("SOCKS greeting has not succeeded."));
+    if (running == TorNetworkMode::OutboundOnly) {
+        lines << tr("Bootstrap is not monitored in outbound-only mode.");
+        lines << tr("Onion service is off in this mode.");
+    } else {
+        lines << (status.authenticated ? tr("Control port authenticated.") :
+                  status.control_connected ? tr("Control port connected, not authenticated.") :
+                                             tr("Control port is not connected."));
+        if (status.bootstrap_percent >= 0) {
+            lines << tr("Tor bootstrap %1%.").arg(status.bootstrap_percent);
+            if (status.bootstrap_complete && !status.onion_service_active) {
+                lines << tr("Bootstrap is complete. The onion service is not established.");
+            }
+        } else {
+            lines << tr("Tor bootstrap percent is not available.");
+        }
+        if (status.onion_service_active) {
+            lines << tr("Onion service active. Onion peers: inbound %1, outbound %2.")
+                        .arg(status.onion_peers_in)
+                        .arg(status.onion_peers_out);
+        } else if (!status.identity_error) {
+            lines << tr("Onion service is not active.");
+        }
+    }
+    if (!status.network_active) lines << tr("P2P network is paused.");
+    return lines.join(QLatin1Char(' '));
+}
+
+bool ClientModel::torStatusVisible() const
+{
+    const TorNetworkMode running = RunningTorNetworkMode();
+    const TorNetworkMode saved = optionsModel ? optionsModel->detectedTorNetworkMode() : TorNetworkMode::Normal;
+    return running != TorNetworkMode::Normal || saved != TorNetworkMode::Normal;
 }
 
 ClientModel::~ClientModel()

@@ -28,6 +28,7 @@
 #include <util/system.h>
 
 #include <chrono>
+#include <thread>
 
 #include <QApplication>
 #include <QClipboard>
@@ -41,6 +42,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -186,14 +188,15 @@ OptionsDialog::OptionsDialog(QWidget* parent, bool enableWallet)
 
 OptionsDialog::~OptionsDialog()
 {
+    if (m_probe_alive) m_probe_alive->store(false);
     delete ui;
 }
 
 void OptionsDialog::setClientModel(ClientModel* client_model)
 {
     m_client_model = client_model;
-    if (m_tor_timer) {
-        m_tor_timer->start(2000);
+    if (m_client_model) {
+        connect(m_client_model, &ClientModel::torStatusChanged, this, &OptionsDialog::refreshTorStatus);
         refreshTorStatus();
     }
 }
@@ -476,10 +479,7 @@ QValidator::State ProxyAddressValidator::validate(QString &input, int &pos) cons
 
 static bool IsLoopbackHost(const QString& host)
 {
-    const QString normalized = host.trimmed().toLower();
-    return normalized == QLatin1String("127.0.0.1") ||
-           normalized == QLatin1String("::1") ||
-           normalized == QLatin1String("localhost");
+    return IsLoopbackTorHost(host.trimmed().toStdString());
 }
 
 static QLineEdit* TorEndpointEdit(QWidget* parent, const QString& text)
@@ -537,6 +537,26 @@ void OptionsDialog::createTorGroup()
     password_row->addWidget(m_tor_password, 1);
     layout->addLayout(password_row);
 
+    auto* detect_row = new QHBoxLayout();
+    m_detect_tor = new QPushButton(tr("Detect local Tor"), group);
+    m_tor_candidates = new QComboBox(group);
+    m_tor_candidates->setEnabled(false);
+    detect_row->addWidget(m_detect_tor);
+    detect_row->addWidget(m_tor_candidates, 1);
+    layout->addLayout(detect_row);
+
+    m_tor_probe = new QLabel(tr("Detection does not change settings. Press OK to save a mode, then restart RIGORCHAIN."), group);
+    m_tor_probe->setWordWrap(true);
+    layout->addWidget(m_tor_probe);
+
+    m_tor_mode_effect = new QLabel(group);
+    m_tor_mode_effect->setWordWrap(true);
+    layout->addWidget(m_tor_mode_effect);
+
+    m_tor_saved_running = new QLabel(group);
+    m_tor_saved_running->setWordWrap(true);
+    layout->addWidget(m_tor_saved_running);
+
     m_tor_status = new QLabel(tr("Tor control is not connected. An onion service is not active."), group);
     m_tor_status->setWordWrap(true);
     layout->addWidget(m_tor_status);
@@ -546,6 +566,9 @@ void OptionsDialog::createTorGroup()
     layout->addWidget(m_onion_address);
     m_onion_peers = new QLabel(tr("Onion peers: inbound 0, outbound 0"), group);
     layout->addWidget(m_onion_peers);
+    m_tor_bootstrap = new QLabel(tr("Tor bootstrap percent is not available."), group);
+    m_tor_bootstrap->setWordWrap(true);
+    layout->addWidget(m_tor_bootstrap);
     m_tor_detail = new QLabel(group);
     m_tor_detail->setWordWrap(true);
     layout->addWidget(m_tor_detail);
@@ -569,14 +592,14 @@ void OptionsDialog::createTorGroup()
     connect(m_tor_control_host, &QLineEdit::textChanged, this, mark_dirty);
     connect(m_tor_control_port, &QLineEdit::textChanged, this, mark_dirty);
     connect(m_tor_password, &QLineEdit::textChanged, this, mark_dirty);
+    connect(m_detect_tor, &QPushButton::clicked, this, &OptionsDialog::detectTor);
+    connect(m_tor_candidates, qOverload<int>(&QComboBox::currentIndexChanged), this, &OptionsDialog::applySelectedProbe);
     connect(m_copy_onion, &QPushButton::clicked, this, [this] {
         if (!m_active_onion.isEmpty()) {
             QApplication::clipboard()->setText(m_active_onion);
         }
     });
 
-    m_tor_timer = new QTimer(this);
-    connect(m_tor_timer, &QTimer::timeout, this, &OptionsDialog::refreshTorStatus);
 }
 
 void OptionsDialog::loadTorForm()
@@ -616,10 +639,14 @@ void OptionsDialog::updateTorFormState()
     const int socks_port = m_tor_socks_port->text().toInt();
     const bool ports_ok = control_port >= 1 && control_port <= 65535 && socks_port >= 1 && socks_port <= 65535;
     const bool control_ok = IsLoopbackHost(m_tor_control_host->text());
-    if (!ports_ok || !control_ok || m_tor_socks_host->text().trimmed().isEmpty()) {
+    const bool socks_ok = IsLoopbackHost(m_tor_socks_host->text());
+    if (m_tor_mode_effect && m_tor_mode) {
+        m_tor_mode_effect->setText(torModeEffect(static_cast<TorNetworkMode>(m_tor_mode->currentData().toInt())));
+    }
+    if (!ports_ok || !control_ok || !socks_ok) {
         setOkButtonState(false);
         ui->statusLabel->setStyleSheet("QLabel { color: red; }");
-        ui->statusLabel->setText(tr("The Tor control endpoint must be a loopback address, and both ports must be between 1 and 65535."));
+        ui->statusLabel->setText(tr("Tor SOCKS and control endpoints must be loopback addresses, and both ports must be between 1 and 65535."));
         return;
     }
     updateProxyValidationState();
@@ -652,6 +679,25 @@ void OptionsDialog::refreshTorStatus()
         m_copy_onion->setEnabled(false);
     }
     m_tor_detail->setText(QString::fromStdString(status.detail));
+    if (m_tor_bootstrap) {
+        const TorNetworkMode running = RunningTorNetworkMode();
+        if (running == TorNetworkMode::OutboundOnly) {
+            m_tor_bootstrap->setText(tr("Bootstrap is not monitored in outbound-only mode."));
+        } else if (status.bootstrap_percent < 0) {
+            m_tor_bootstrap->setText(tr("Tor bootstrap percent is not available."));
+        } else if (status.bootstrap_complete && !status.onion_service_active) {
+            m_tor_bootstrap->setText(tr("Tor bootstrap %1%. Bootstrap complete is not an onion service.").arg(status.bootstrap_percent));
+        } else {
+            m_tor_bootstrap->setText(tr("Tor bootstrap %1%.").arg(status.bootstrap_percent));
+        }
+    }
+    if (m_tor_saved_running && model) {
+        const TorNetworkMode saved = model->detectedTorNetworkMode();
+        const TorNetworkMode running = RunningTorNetworkMode();
+        m_tor_saved_running->setText(saved == running
+            ? tr("Saved mode and running mode match.")
+            : tr("Saved mode is not the running mode. Restart RIGORCHAIN before these Tor settings take effect."));
+    }
 
     int inbound = 0;
     int outbound = 0;
@@ -665,5 +711,103 @@ void OptionsDialog::refreshTorStatus()
             else ++outbound;
         }
     }
-    m_onion_peers->setText(tr("Onion peers: inbound %1, outbound %2").arg(inbound).arg(outbound));
+    m_onion_peers->setText(tr("Onion peers: inbound %1, outbound %2. These counts are not the total peer count.").arg(inbound).arg(outbound));
+}
+
+QString OptionsDialog::torModeEffect(TorNetworkMode mode) const
+{
+    switch (mode) {
+    case TorNetworkMode::OutboundOnly:
+        return tr("Tor outbound keeps clearnet available through the SOCKS proxy and does not create an onion service.");
+    case TorNetworkMode::InboundOutbound:
+        return tr("Tor inbound and outbound sends connections through the SOCKS proxy and creates an onion service. This is the default when a complete local Tor is selected.");
+    case TorNetworkMode::Dual:
+        return tr("Dual network keeps ordinary IPv4/IPv6 direct and uses Tor only for onion destinations and the onion service.");
+    case TorNetworkMode::TorOnly:
+        return tr("Tor only disables ordinary IPv4/IPv6. It does not fall back to clearnet when Tor is down. Choose it only on purpose.");
+    case TorNetworkMode::Normal:
+        break;
+    }
+    return tr("Normal network does not use Tor.");
+}
+
+void OptionsDialog::detectTor()
+{
+    if (!m_detect_tor || !m_probe_alive) return;
+    m_detect_tor->setEnabled(false);
+    m_tor_probe->setText(tr("Checking the saved loopback pair, 127.0.0.1:9050/9051, and 127.0.0.1:9150/9151. Settings are not changed."));
+    const QString socks_host = m_tor_socks_host->text().trimmed();
+    const QString control_host = m_tor_control_host->text().trimmed();
+    const int socks_port = m_tor_socks_port->text().toInt();
+    const int control_port = m_tor_control_port->text().toInt();
+    std::vector<TorProbePair> pairs = BuildTorProbePairs(socks_host.toStdString(), static_cast<uint16_t>(socks_port),
+                                                         control_host.toStdString(), static_cast<uint16_t>(control_port));
+    std::shared_ptr<std::atomic<bool>> alive = m_probe_alive;
+    QPointer<OptionsDialog> self(this);
+    std::thread([self, alive, pairs] {
+        const std::vector<TorProbePair> results = ProbeExistingTor(pairs, 2000);
+        if (!alive->load() || !self) return;
+        QMetaObject::invokeMethod(self.data(), [self, alive, results] {
+            if (!self || !alive->load()) return;
+            self->showProbeResults(results);
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void OptionsDialog::showProbeResults(const std::vector<TorProbePair>& pairs)
+{
+    m_probe_results = pairs;
+    if (m_detect_tor) m_detect_tor->setEnabled(true);
+    if (!m_tor_candidates) return;
+    m_tor_loading = true;
+    m_tor_candidates->clear();
+    int complete = 0;
+    int first_complete = -1;
+    for (int i = 0; i < static_cast<int>(pairs.size()); ++i) {
+        const TorProbePair& pair = pairs[i];
+        const QString row = tr("SOCKS %1:%2 %3; control %4:%5 %6")
+            .arg(QString::fromStdString(pair.socks_host))
+            .arg(pair.socks_port)
+            .arg(pair.socks_greeting_ok ? tr("greeting ok") : pair.socks_tcp ? tr("not SOCKS5") : tr("unreachable"))
+            .arg(QString::fromStdString(pair.control_host))
+            .arg(pair.control_port)
+            .arg(pair.control_is_tor ? tr("Tor PROTOCOLINFO") : pair.control_tcp ? tr("not Tor") : tr("unreachable"));
+        m_tor_candidates->addItem(row, i);
+        if (pair.socks_greeting_ok && pair.control_is_tor) {
+            ++complete;
+            if (first_complete < 0) first_complete = i;
+        }
+    }
+    m_tor_candidates->setEnabled(!pairs.empty());
+    if (complete == 1 && first_complete >= 0) {
+        m_tor_candidates->setCurrentIndex(first_complete);
+    }
+    m_tor_loading = false;
+    if (complete == 1) applySelectedProbe(m_tor_candidates->currentIndex());
+    if (m_tor_probe) {
+        m_tor_probe->setText(complete == 0
+            ? tr("No complete local Tor pair. An open TCP port was not treated as Tor. Settings were not changed.")
+            : tr("%1 complete local Tor pair(s). Choose one if several are listed, choose a mode, then press OK. Settings change only when you press OK.").arg(complete));
+    }
+    if (complete >= 1 && m_tor_mode && !m_tor_form_dirty) {
+        const TorNetworkMode current = static_cast<TorNetworkMode>(m_tor_mode->currentData().toInt());
+        if (current == TorNetworkMode::Normal) {
+            const int index = m_tor_mode->findData(static_cast<int>(TorNetworkMode::InboundOutbound));
+            if (index >= 0) m_tor_mode->setCurrentIndex(index);
+        }
+    }
+}
+
+void OptionsDialog::applySelectedProbe(int index)
+{
+    if (m_tor_loading || index < 0 || index >= static_cast<int>(m_probe_results.size())) return;
+    const TorProbePair& pair = m_probe_results[index];
+    if (pair.skipped_non_loopback || !IsLoopbackHost(QString::fromStdString(pair.socks_host)) || !IsLoopbackHost(QString::fromStdString(pair.control_host))) {
+        return;
+    }
+    if (!pair.socks_greeting_ok && !pair.control_is_tor) return;
+    m_tor_socks_host->setText(QString::fromStdString(pair.socks_host));
+    m_tor_socks_port->setText(QString::number(pair.socks_port));
+    m_tor_control_host->setText(QString::fromStdString(pair.control_host));
+    m_tor_control_port->setText(QString::number(pair.control_port));
 }

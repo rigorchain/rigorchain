@@ -129,6 +129,7 @@ private:
     GUIUtil::ThemedLabel* labelWalletEncryptionIcon = nullptr;
     GUIUtil::ThemedLabel* labelWalletHDStatusIcon = nullptr;
     GUIUtil::ClickableLabel* labelProxyIcon = nullptr;
+    QLabel* labelTorStatus = nullptr;
     GUIUtil::ClickableLabel* connectionsControl = nullptr;
     GUIUtil::ClickableLabel* labelBlocksIcon = nullptr;
     QLabel* progressBarLabel = nullptr;
@@ -307,6 +308,8 @@ public Q_SLOTS:
 private:
     /** Set the proxy-enabled icon as shown in the UI. */
     void updateProxyIcon();
+    /** Separate Tor text. Does not change the proxy icon. */
+    void updateTorStatus();
     void updateWindowTitle();
 
 public Q_SLOTS:

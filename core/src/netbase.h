@@ -256,6 +256,23 @@ void InterruptSocks5(bool interrupt);
  * @see <a href="https://www.ietf.org/rfc/rfc1928.txt">RFC1928: SOCKS Protocol
  *      Version 5</a>
  */
+/** Result of SOCKS5 version and method selection. No CONNECT is sent. */
+struct Socks5GreetingResult {
+    bool ok{false};
+    uint8_t method{0xff};
+    bool send_failed{false};
+    bool version_rejected{false};
+    bool io_failed{false};
+};
+
+/**
+ * Exchange the SOCKS5 greeting only.
+ * A null auth pointer offers NOAUTH, matching Socks5. A non-null auth pointer
+ * also offers username/password so stream isolation is unchanged.
+ * timeout_ms bounds the method-selection read.
+ */
+Socks5GreetingResult Socks5Greeting(const Sock& sock, const ProxyCredentials* auth, int timeout_ms);
+
 bool Socks5(const std::string& strDest, uint16_t port, const ProxyCredentials* auth, const Sock& socket);
 
 /**

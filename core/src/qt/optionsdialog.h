@@ -9,6 +9,11 @@
 #include <QValidator>
 
 #include <tor_mode.h>
+#include <torcontrol.h>
+
+#include <atomic>
+#include <memory>
+#include <vector>
 
 class ClientModel;
 class OptionsModel;
@@ -71,6 +76,8 @@ private Q_SLOTS:
     void updateDefaultProxyNets();
     void updateTorFormState();
     void refreshTorStatus();
+    void detectTor();
+    void applySelectedProbe(int index);
 
 Q_SIGNALS:
     void proxyIpChecks(QValidatedLineEdit *pUiProxyIp, uint16_t nProxyPort);
@@ -79,6 +86,8 @@ Q_SIGNALS:
 private:
     void createTorGroup();
     void loadTorForm();
+    void showProbeResults(const std::vector<TorProbePair>& pairs);
+    QString torModeEffect(TorNetworkMode mode) const;
 
     Ui::OptionsDialog *ui;
     ClientModel* m_client_model{nullptr};
@@ -94,8 +103,16 @@ private:
     class QLabel* m_onion_address{nullptr};
     class QLabel* m_onion_peers{nullptr};
     class QLabel* m_tor_detail{nullptr};
+    class QLabel* m_tor_saved_running{nullptr};
+    class QLabel* m_tor_bootstrap{nullptr};
+    class QLabel* m_tor_mode_effect{nullptr};
+    class QLabel* m_tor_probe{nullptr};
+    class QPushButton* m_detect_tor{nullptr};
     class QPushButton* m_copy_onion{nullptr};
+    class QComboBox* m_tor_candidates{nullptr};
     class QTimer* m_tor_timer{nullptr};
+    std::vector<TorProbePair> m_probe_results;
+    std::shared_ptr<std::atomic<bool>> m_probe_alive{std::make_shared<std::atomic<bool>>(true)};
     TorNetworkMode m_tor_mode_at_open{TorNetworkMode::Normal};
     bool m_tor_form_dirty{false};
     bool m_tor_loading{false};

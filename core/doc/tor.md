@@ -13,6 +13,22 @@ configure Tor.
 
 - Tor removed v2 support beginning with version 0.4.6.
 
+## Wallet one-click setup
+
+The wallet settings dialog can detect a Tor process that is already running on this computer. Detection sends a SOCKS5 greeting and `PROTOCOLINFO 1` to loopback endpoints only. It does not install Tor, start Tor, or edit a system `torrc`.
+
+Choose a result and press OK to save a network mode. The wallet saves that mode only when both the SOCKS host and the control host are `127.0.0.1`, `::1`, or `localhost`. The tested address is `127.0.0.1`, with SOCKS port 9050 and control port 9051. The control probe does not bracket an IPv6 address, so `::1` is not a supported detection endpoint. Tor Browser's SOCKS port alone is not the inbound setup this dialog was tested with.
+
+The wallet prefers SAFECOOKIE when Tor advertises it, and it does not select NULL authentication while SAFECOOKIE is available. It registers an onion service only after control authentication succeeds. The service is not detached. Closing the control connection removes it. The identity file is `<datadir>/onion_v3_private_key`. A saved key that cannot be read is not replaced.
+
+| Platform | Support |
+|---|---|
+| Windows | Implemented and tested with a local `tor.exe` listening on `127.0.0.1:9050` and `127.0.0.1:9051`. |
+| Linux | Implemented and tested on Ubuntu 22.04 under WSL2, using that distribution's Tor package on the same loopback ports. A separate native Linux installation was not tested. |
+| macOS | Not implemented and not validated. |
+
+A locally registered onion address does not by itself show that the service is reachable from another machine.
+
 ## How to see information about your Tor configuration via Rigor Core
 
 There are several ways to see your local onion address in Rigor Core:

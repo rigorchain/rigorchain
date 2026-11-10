@@ -21,10 +21,17 @@
 #include <util/thread.h>
 #include <util/time.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <chrono>
 #include <deque>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <set>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifdef WIN32
@@ -72,6 +79,309 @@ TorServiceStatus GetTorServiceStatus()
 {
     LOCK(g_tor_status_mutex);
     return g_tor_status;
+}
+
+void NoteTorPeerSnapshot(int onion_in, int onion_out, bool network_active)
+{
+    UpdateTorServiceStatus([&](TorServiceStatus& status) {
+        status.onion_peers_in = onion_in;
+        status.onion_peers_out = onion_out;
+        status.network_active = network_active;
+    });
+}
+
+bool IsLoopbackTorHost(const std::string& host)
+{
+    std::string normalized = host;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return normalized == "127.0.0.1" || normalized == "::1" || normalized == "localhost";
+}
+
+static bool IsEd25519V3Key(const std::string& key)
+{
+    const std::string prefix = "ED25519-V3:";
+    if (key.size() <= prefix.size() || key.compare(0, prefix.size(), prefix) != 0) return false;
+    if (key.size() > 200) return false;
+    for (size_t i = prefix.size(); i < key.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(key[i]);
+        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+OnionIdentityDecision LoadOnionIdentity(const fs::path& path)
+{
+    OnionIdentityDecision decision;
+    std::error_code exists_ec;
+    const bool exists = std::filesystem::exists(path, exists_ec);
+    if (exists_ec) {
+        decision.action = OnionIdentityAction::RefuseExisting;
+        decision.error = "Onion identity file could not be checked; a new identity was not created";
+        return decision;
+    }
+    if (!exists) {
+        decision.action = OnionIdentityAction::CreateNew;
+        return decision;
+    }
+    const std::pair<bool, std::string> body = ReadBinaryFile(path);
+    if (!body.first) {
+        decision.action = OnionIdentityAction::RefuseExisting;
+        decision.error = "Saved onion identity could not be read; a new identity was not created";
+        return decision;
+    }
+    std::string key = body.second;
+    while (!key.empty() && (key.back() == '\n' || key.back() == '\r')) key.pop_back();
+    if (!IsEd25519V3Key(key)) {
+        decision.action = OnionIdentityAction::RefuseExisting;
+        decision.error = "Saved onion identity is not a usable ED25519-V3 key; it was not replaced";
+        return decision;
+    }
+    decision.action = OnionIdentityAction::UseExisting;
+    decision.key = key;
+    return decision;
+}
+
+std::string OnionPrivateKeyForAdd(const OnionIdentityDecision& decision)
+{
+    if (decision.action == OnionIdentityAction::UseExisting) return decision.key;
+    if (decision.action == OnionIdentityAction::CreateNew) return "NEW:ED25519-V3";
+    return {};
+}
+
+std::pair<std::string, std::string> SplitTorReplyLine(const std::string& s);
+std::map<std::string, std::string> ParseTorReplyMapping(const std::string& s);
+
+std::optional<int> ParseBootstrapProgress(const std::string& line)
+{
+    const std::string key = "PROGRESS=";
+    const size_t pos = line.find(key);
+    if (pos == std::string::npos) return std::nullopt;
+    size_t i = pos + key.size();
+    if (i >= line.size() || !std::isdigit(static_cast<unsigned char>(line[i]))) return std::nullopt;
+    int value = 0;
+    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) {
+        value = value * 10 + (line[i] - '0');
+        if (value > 100) return std::nullopt;
+        ++i;
+    }
+    return value;
+}
+
+bool TorProtocolInfoIsTor(int code, const std::vector<std::string>& lines, std::string& methods_out)
+{
+    methods_out.clear();
+    if (code != 250) return false;
+    bool saw_methods = false;
+    bool saw_tor = false;
+    for (const std::string& line : lines) {
+        const std::pair<std::string, std::string> parts = SplitTorReplyLine(line);
+        if (parts.first == "AUTH") {
+            const std::map<std::string, std::string> mapping = ParseTorReplyMapping(parts.second);
+            const auto methods = mapping.find("METHODS");
+            if (methods != mapping.end() && !methods->second.empty()) {
+                methods_out = methods->second;
+                saw_methods = true;
+            }
+        } else if (parts.first == "VERSION") {
+            const std::map<std::string, std::string> mapping = ParseTorReplyMapping(parts.second);
+            const auto tor = mapping.find("Tor");
+            if (tor != mapping.end() && !tor->second.empty()) saw_tor = true;
+        }
+    }
+    return saw_methods && saw_tor;
+}
+
+static bool SameProbePair(const TorProbePair& a, const TorProbePair& b)
+{
+    return a.socks_host == b.socks_host && a.socks_port == b.socks_port &&
+           a.control_host == b.control_host && a.control_port == b.control_port;
+}
+
+std::vector<TorProbePair> BuildTorProbePairs(const std::string& saved_socks_host, uint16_t saved_socks_port,
+                                            const std::string& saved_control_host, uint16_t saved_control_port)
+{
+    std::vector<TorProbePair> pairs;
+    auto add = [&](const std::string& socks_host, uint16_t socks_port, const std::string& control_host, uint16_t control_port) {
+        if (pairs.size() >= 3) return;
+        if (!IsLoopbackTorHost(socks_host) || !IsLoopbackTorHost(control_host)) return;
+        if (socks_port < 1 || control_port < 1) return;
+        TorProbePair pair;
+        pair.socks_host = socks_host;
+        pair.socks_port = socks_port;
+        pair.control_host = control_host;
+        pair.control_port = control_port;
+        for (const TorProbePair& existing : pairs) {
+            if (SameProbePair(existing, pair)) return;
+        }
+        pairs.push_back(pair);
+    };
+    add(saved_socks_host, saved_socks_port, saved_control_host, saved_control_port);
+    add("127.0.0.1", 9050, "127.0.0.1", 9051);
+    add("127.0.0.1", 9150, "127.0.0.1", 9151);
+    return pairs;
+}
+
+TorNetworkMode RunningTorNetworkMode()
+{
+    TorModeInputs in;
+    const std::string proxy = gArgs.GetArg("-proxy", "");
+    const std::string onion = gArgs.GetArg("-onion", "");
+    in.proxy_set = !proxy.empty() && proxy != "0";
+    in.separate_onion_proxy = !onion.empty() && onion != "0";
+    in.listen = gArgs.GetBoolArg("-listen", DEFAULT_LISTEN);
+    in.listen_onion = gArgs.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION);
+    const std::vector<std::string> onlynets = gArgs.GetArgs("-onlynet");
+    in.onlynet_onion_only = onlynets.size() == 1 && onlynets[0] == "onion";
+    const std::vector<std::string> binds = gArgs.GetArgs("-bind");
+    if (binds.size() == 1) {
+        const std::string& bind = binds[0];
+        const bool loopback = bind.find("127.0.0.1:") != std::string::npos || bind.find("[::1]:") != std::string::npos;
+        in.bind_is_onion_only = loopback && bind.size() >= 6 && bind.compare(bind.size() - 6, 6, "=onion") == 0;
+    }
+    return InferTorNetworkMode(in);
+}
+
+static void EnsureLibeventThreads()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+#ifdef WIN32
+        evthread_use_windows_threads();
+#else
+        evthread_use_pthreads();
+#endif
+    });
+}
+
+static bool TcpConnectLoopback(const std::string& host, uint16_t port, int timeout_ms, std::unique_ptr<Sock>& out)
+{
+    if (!IsLoopbackTorHost(host) || port < 1) return false;
+    CService address;
+    if (!Lookup(host, address, port, false) || !address.IsValid()) return false;
+    out = CreateSock(address);
+    if (!out) return false;
+    if (!ConnectSocketDirectly(address, *out, timeout_ms, true)) {
+        out.reset();
+        return false;
+    }
+    out->SetNonBlocking();
+    return true;
+}
+
+static void ProbeConfiguredSocksBlocking()
+{
+    Proxy proxy;
+    if (!GetProxy(NET_ONION, proxy) && !GetProxy(NET_IPV4, proxy)) return;
+    if (!proxy.IsValid() || !IsLoopbackTorHost(proxy.proxy.ToStringAddr())) {
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.socks_reachable = false;
+            status.socks_handshake_ok = false;
+        });
+        return;
+    }
+    std::unique_ptr<Sock> sock;
+    const bool tcp = TcpConnectLoopback(proxy.proxy.ToStringAddr(), proxy.proxy.GetPort(), 2000, sock);
+    bool greeting_ok = false;
+    if (tcp && sock) {
+        const Socks5GreetingResult greeting = Socks5Greeting(*sock, nullptr, 2000);
+        greeting_ok = greeting.ok && (greeting.method == 0x00 || greeting.method == 0x02);
+    }
+    UpdateTorServiceStatus([tcp, greeting_ok](TorServiceStatus& status) {
+        status.socks_reachable = tcp;
+        status.socks_handshake_ok = greeting_ok;
+    });
+}
+
+void ProbeConfiguredSocksOnce()
+{
+    Proxy proxy;
+    if (!GetProxy(NET_ONION, proxy) && !GetProxy(NET_IPV4, proxy)) return;
+    if (!proxy.IsValid()) return;
+    static std::atomic<bool> started{false};
+    if (started.exchange(true)) return;
+    std::thread([] { ProbeConfiguredSocksBlocking(); }).detach();
+}
+
+std::vector<TorProbePair> ProbeExistingTor(const std::vector<TorProbePair>& pairs, int timeout_ms)
+{
+    EnsureLibeventThreads();
+    std::vector<TorProbePair> results;
+    results.reserve(std::min<size_t>(pairs.size(), 3));
+    for (const TorProbePair& requested : pairs) {
+        if (results.size() >= 3) break;
+        TorProbePair pair = requested;
+        if (!IsLoopbackTorHost(pair.socks_host) || !IsLoopbackTorHost(pair.control_host)) {
+            pair.skipped_non_loopback = true;
+            pair.detail = "Refused a non-loopback Tor endpoint";
+            results.push_back(pair);
+            continue;
+        }
+        std::unique_ptr<Sock> socks;
+        pair.socks_tcp = TcpConnectLoopback(pair.socks_host, pair.socks_port, timeout_ms, socks);
+        if (pair.socks_tcp && socks) {
+            const Socks5GreetingResult greeting = Socks5Greeting(*socks, nullptr, timeout_ms);
+            pair.socks_greeting_ok = greeting.ok && (greeting.method == 0x00 || greeting.method == 0x02);
+            pair.detail = pair.socks_greeting_ok ? "SOCKS5 greeting succeeded" : "TCP accepted, SOCKS5 greeting failed";
+        } else {
+            pair.detail = "SOCKS endpoint unreachable";
+        }
+        socks.reset();
+
+        event_base* base = event_base_new();
+        if (base) {
+            struct ProbeState {
+                event_base* base{nullptr};
+                bool connected{false};
+                bool finished{false};
+                int code{0};
+                std::vector<std::string> lines;
+            } state;
+            state.base = base;
+            TorControlConnection conn(base);
+            const std::string endpoint = strprintf("%s:%u", pair.control_host, pair.control_port);
+            const bool began = conn.Connect(endpoint,
+                [&](TorControlConnection& connection) {
+                    state.connected = true;
+                    connection.Command("PROTOCOLINFO 1", [&](TorControlConnection&, const TorControlReply& reply) {
+                        state.code = reply.code;
+                        state.lines = reply.lines;
+                        state.finished = true;
+                        event_base_loopbreak(state.base);
+                    });
+                },
+                [&](TorControlConnection&) {
+                    if (!state.finished) event_base_loopbreak(state.base);
+                });
+            if (began) {
+                struct timeval tv = MillisToTimeval(timeout_ms);
+                event_base_loopexit(base, &tv);
+                event_base_dispatch(base);
+            }
+            conn.Disconnect();
+            event_base_free(base);
+            pair.control_tcp = state.connected;
+            pair.control_is_tor = TorProtocolInfoIsTor(state.code, state.lines, pair.auth_methods);
+        }
+        if (pair.control_is_tor) {
+            pair.detail += pair.detail.empty() ? "Tor control PROTOCOLINFO" : "; Tor control PROTOCOLINFO";
+        } else if (pair.control_tcp) {
+            pair.detail += "; port open, not a Tor control port";
+        } else {
+            pair.detail += "; control endpoint unreachable";
+        }
+        results.push_back(pair);
+    }
+    bool detected = false;
+    for (const TorProbePair& pair : results) {
+        if (pair.control_is_tor) detected = true;
+    }
+    if (detected) {
+        UpdateTorServiceStatus([](TorServiceStatus& status) { status.runtime_detected = true; });
+    }
+    return results;
 }
 
 TorModeInputs ResolveTorModeInputs(const TorSettingsPresence& saved)
@@ -457,21 +767,36 @@ TorController::TorController(struct event_base* _base, const std::string& tor_co
     reconnect_ev = event_new(base, -1, 0, reconnect_cb, this);
     if (!reconnect_ev)
         LogPrintf("tor: Failed to create event for reconnection: out of memory?\n");
+    bootstrap_ev = event_new(_base, -1, 0, bootstrap_timer_cb, this);
+    if (!bootstrap_ev)
+        LogPrintf("tor: Failed to create event for bootstrap polling: out of memory?\n");
     // Start connection attempts immediately
     if (!conn.Connect(m_tor_control_center, std::bind(&TorController::connected_cb, this, std::placeholders::_1),
          std::bind(&TorController::disconnected_cb, this, std::placeholders::_1) )) {
         LogPrintf("tor: Initiating connection to Tor control port %s failed\n", m_tor_control_center);
     }
-    // Read service private key if cached
-    std::pair<bool,std::string> pkf = ReadBinaryFile(GetPrivateKeyFile());
-    if (pkf.first) {
+    // Read the cached onion identity. A present file that cannot be used
+    // must not fall through to NEW: and must not be overwritten.
+    m_identity = LoadOnionIdentity(GetPrivateKeyFile());
+    if (m_identity.action == OnionIdentityAction::UseExisting) {
         LogPrint(BCLog::TOR, "Reading cached private key from %s\n", fs::PathToString(GetPrivateKeyFile()));
-        private_key = pkf.second;
+        private_key = m_identity.key;
+    } else if (m_identity.action == OnionIdentityAction::RefuseExisting) {
+        LogPrintf("tor: %s\n", m_identity.error);
+        UpdateTorServiceStatus([&](TorServiceStatus& status) {
+            status.identity_error = true;
+            status.identity_restored = false;
+            status.detail = m_identity.error;
+        });
     }
 }
 
 TorController::~TorController()
 {
+    if (bootstrap_ev) {
+        event_free(bootstrap_ev);
+        bootstrap_ev = nullptr;
+    }
     if (reconnect_ev) {
         event_free(reconnect_ev);
         reconnect_ev = nullptr;
@@ -582,13 +907,18 @@ void TorController::add_onion_cb(TorControlConnection& _conn, const TorControlRe
         }
         const bool advertised = AddLocal(service, LOCAL_MANUAL);
         const std::string onion_address = service_id + ".onion";
+        const bool restored = m_identity.action == OnionIdentityAction::UseExisting;
         UpdateTorServiceStatus([&](TorServiceStatus& status) {
             status.authenticated = true;
             status.onion_service_active = true;
+            status.identity_restored = restored;
+            status.identity_error = false;
             status.onion_address = onion_address;
-            status.detail = advertised ?
-                "Onion service created and registered for advertisement" :
-                "Onion service created; local advertisement was not accepted";
+            status.detail = restored ?
+                (advertised ? "Saved onion identity restored and registered for advertisement" :
+                              "Saved onion identity restored; local advertisement was not accepted") :
+                (advertised ? "Onion service created and registered for advertisement" :
+                              "Onion service created; local advertisement was not accepted");
         });
         // ... onion requested - keep connection open
     } else if (reply.code == 510) { // 510 Unrecognized command
@@ -609,16 +939,78 @@ void TorController::add_onion_cb(TorControlConnection& _conn, const TorControlRe
     }
 }
 
+void TorController::RequestBootstrap()
+{
+    if (m_bootstrap_unsupported || m_bootstrap_query_inflight) return;
+    if (!conn.Command("GETINFO status/bootstrap-phase", std::bind(&TorController::bootstrap_cb, this, std::placeholders::_1, std::placeholders::_2))) {
+        return;
+    }
+    m_bootstrap_query_inflight = true;
+}
+
+void TorController::ArmBootstrapTimer()
+{
+    if (!bootstrap_ev) return;
+    struct timeval tv = MillisToTimeval(2000);
+    event_add(bootstrap_ev, &tv);
+}
+
+void TorController::bootstrap_timer_cb(evutil_socket_t fd, short what, void* arg)
+{
+    (void)fd;
+    (void)what;
+    TorController* self = static_cast<TorController*>(arg);
+    self->RequestBootstrap();
+}
+
+void TorController::bootstrap_cb(TorControlConnection& _conn, const TorControlReply& reply)
+{
+    (void)_conn;
+    m_bootstrap_query_inflight = false;
+    if (reply.code == 510) {
+        m_bootstrap_unsupported = true;
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.bootstrap_percent = -1;
+            status.bootstrap_complete = false;
+        });
+        return;
+    }
+    std::optional<int> progress;
+    if (reply.code == 250) {
+        for (const std::string& line : reply.lines) {
+            progress = ParseBootstrapProgress(line);
+            if (progress) break;
+        }
+    }
+    if (!progress) {
+        UpdateTorServiceStatus([](TorServiceStatus& status) {
+            status.bootstrap_percent = -1;
+            status.bootstrap_complete = false;
+        });
+        ArmBootstrapTimer();
+        return;
+    }
+    const int percent = *progress;
+    UpdateTorServiceStatus([percent](TorServiceStatus& status) {
+        status.bootstrap_percent = percent;
+        status.bootstrap_complete = percent == 100;
+    });
+    if (percent != 100) ArmBootstrapTimer();
+}
+
 void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& reply)
 {
     if (reply.code == 250) {
         LogPrint(BCLog::TOR, "Authentication successful\n");
-        UpdateTorServiceStatus([](TorServiceStatus& status) {
+        const bool identity_blocked = m_identity.action == OnionIdentityAction::RefuseExisting;
+        UpdateTorServiceStatus([&](TorServiceStatus& status) {
             status.control_connected = true;
             status.authenticated = true;
             status.onion_service_active = false;
             status.onion_address.clear();
-            status.detail = "Authenticated; onion service not created yet";
+            status.identity_error = identity_blocked;
+            status.identity_restored = false;
+            status.detail = identity_blocked ? m_identity.error : "Authenticated; onion service not created yet";
         });
 
         // Now that we know Tor is running setup the proxy for onion addresses
@@ -626,13 +1018,24 @@ void TorController::auth_cb(TorControlConnection& _conn, const TorControlReply& 
         if (gArgs.GetArg("-onion", "") == "") {
             _conn.Command("GETINFO net/listeners/socks", std::bind(&TorController::get_socks_cb, this, std::placeholders::_1, std::placeholders::_2));
         }
+        ProbeConfiguredSocksOnce();
+        RequestBootstrap();
 
-        // Finally - now create the service
-        if (private_key.empty()) { // No private key, generate one
-            private_key = "NEW:ED25519-V3"; // Explicitly request key type - see issue #9214
+        if (identity_blocked) {
+            LogPrintf("tor: %s\n", m_identity.error);
+            return;
         }
+        const std::string add_key = OnionPrivateKeyForAdd(m_identity);
+        if (add_key.empty()) {
+            UpdateTorServiceStatus([&](TorServiceStatus& status) {
+                status.identity_error = true;
+                status.detail = m_identity.error.empty() ? "Onion identity was not sent" : m_identity.error;
+            });
+            return;
+        }
+        private_key = add_key;
         // Request onion service, redirect port.
-        // Note that the 'virtual' port is always the default port to avoid decloaking nodes using other ports.
+        // The virtual port is the default P2P port so a non-default -port does not decloak the node.
         _conn.Command(MakeAddOnionCommand(private_key, Params().GetDefaultPort(), m_target),
             std::bind(&TorController::add_onion_cb, this, std::placeholders::_1, std::placeholders::_2));
     } else {
@@ -740,6 +1143,9 @@ void TorController::protocolinfo_cb(TorControlConnection& _conn, const TorContro
         for (const std::string &s : methods) {
             LogPrint(BCLog::TOR, "Supported authentication method: %s\n", s);
         }
+        if (!methods.empty()) {
+            UpdateTorServiceStatus([](TorServiceStatus& status) { status.runtime_detected = true; });
+        }
         // Password wins when the operator set one. Otherwise SAFECOOKIE wins
         // over NULL, so a control port that still advertises NULL cannot
         // skip cookie authentication. NULL remains only when it is the only
@@ -792,10 +1198,13 @@ void TorController::connected_cb(TorControlConnection& _conn)
 {
     reconnect_timeout = RECONNECT_TIMEOUT_START;
     UpdateTorServiceStatus([](TorServiceStatus& status) {
+        status.control_reachable = true;
         status.control_connected = true;
         status.authenticated = false;
         status.onion_service_active = false;
         status.onion_address.clear();
+        status.bootstrap_percent = -1;
+        status.bootstrap_complete = false;
         status.detail = "Control connection open; authentication not finished";
     });
     // First send a PROTOCOLINFO command to figure out what authentication is expected
@@ -810,12 +1219,21 @@ void TorController::disconnected_cb(TorControlConnection& _conn)
     if (service.IsValid())
         RemoveLocal(service);
     service = CService();
-    UpdateTorServiceStatus([](TorServiceStatus& status) {
+    m_bootstrap_query_inflight = false;
+    if (bootstrap_ev) event_del(bootstrap_ev);
+    const bool identity_blocked = m_identity.action == OnionIdentityAction::RefuseExisting;
+    const std::string identity_error = m_identity.error;
+    UpdateTorServiceStatus([identity_blocked, identity_error](TorServiceStatus& status) {
         status.control_connected = false;
         status.authenticated = false;
         status.onion_service_active = false;
         status.onion_address.clear();
-        status.detail = "Control connection closed";
+        status.identity_restored = false;
+        status.identity_error = identity_blocked;
+        status.bootstrap_percent = -1;
+        status.bootstrap_complete = false;
+        status.detail = identity_blocked ? identity_error :
+            "Control connection closed; saved onion identity file was not changed";
     });
     if (!reconnect)
         return;

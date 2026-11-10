@@ -10,15 +10,25 @@
 #include <tor_mode.h>
 #include <torcontrol.h>
 
+#include <util/readwritefile.h>
+#include <util/system.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <compat/compat.h>
+
 #ifndef WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #else
 #include <windows.h>
 #include <aclapi.h>
@@ -374,6 +384,11 @@ BOOST_AUTO_TEST_CASE(tor_service_status_starts_inactive)
     const TorServiceStatus status = GetTorServiceStatus();
     BOOST_CHECK(!status.onion_service_active);
     BOOST_CHECK(status.onion_address.empty());
+    BOOST_CHECK_EQUAL(status.bootstrap_percent, -1);
+    BOOST_CHECK(!status.bootstrap_complete);
+    BOOST_CHECK(!status.identity_restored);
+    BOOST_CHECK(!status.identity_error);
+    BOOST_CHECK(!status.socks_handshake_ok);
 }
 
 BOOST_AUTO_TEST_CASE(auth_method_prefers_safecookie_over_null)
@@ -390,6 +405,265 @@ BOOST_AUTO_TEST_CASE(auth_method_prefers_safecookie_over_null)
     BOOST_CHECK(redacted.find("secretvalue") == std::string::npos);
     BOOST_CHECK(redacted.find("PrivateKey=[redacted]") != std::string::npos);
     BOOST_CHECK_EQUAL(RedactTorControlSecret("ServiceID=abc"), "ServiceID=abc");
+}
+
+static std::string ReadUntilQuiet(SOCKET client)
+{
+    std::string out;
+    while (out.size() < 512) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(client, &fds);
+        timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = out.empty() ? 1500000 : 200000;
+#ifdef WIN32
+        const int ready = select(0, &fds, nullptr, nullptr, &tv);
+#else
+        const int ready = select(client + 1, &fds, nullptr, nullptr, &tv);
+#endif
+        if (ready <= 0) break;
+        char buf[256];
+        const int n = recv(client, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        out.append(buf, n);
+    }
+    return out;
+}
+
+static void CloseTestSocket(SOCKET fd)
+{
+#ifdef WIN32
+    closesocket(fd);
+#else
+    ::close(fd);
+#endif
+}
+
+static void ServeOnce(std::atomic<uint16_t>& port_out, std::string& received, const std::string& reply)
+{
+    const SOCKET listen_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    BOOST_REQUIRE(listen_fd != INVALID_SOCKET);
+    int yes = 1;
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(0);
+    BOOST_REQUIRE_EQUAL(bind(listen_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    BOOST_REQUIRE_EQUAL(listen(listen_fd, 1), 0);
+    sockaddr_in bound{};
+    socklen_t bound_len = sizeof(bound);
+    BOOST_REQUIRE_EQUAL(getsockname(listen_fd, reinterpret_cast<sockaddr*>(&bound), &bound_len), 0);
+    port_out.store(ntohs(bound.sin_port));
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(listen_fd, &fds);
+    timeval tv;
+    tv.tv_sec = 3;
+    tv.tv_usec = 0;
+#ifdef WIN32
+    const int ready = select(0, &fds, nullptr, nullptr, &tv);
+#else
+    const int ready = select(listen_fd + 1, &fds, nullptr, nullptr, &tv);
+#endif
+    if (ready > 0) {
+        const SOCKET client = accept(listen_fd, nullptr, nullptr);
+        if (client != INVALID_SOCKET) {
+            received = ReadUntilQuiet(client);
+            if (!reply.empty()) {
+                send(client, reply.data(), reply.size(), 0);
+                received += ReadUntilQuiet(client);
+            }
+            CloseTestSocket(client);
+        }
+    }
+    CloseTestSocket(listen_fd);
+}
+
+BOOST_AUTO_TEST_CASE(onion_identity_is_not_replaced_when_the_existing_key_cannot_be_used)
+{
+    const fs::path dir = fs::temp_directory_path() / "rigor-onion-identity-guard";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path missing = dir / "missing_onion_v3_private_key";
+    const OnionIdentityDecision created = LoadOnionIdentity(missing);
+    BOOST_CHECK(created.action == OnionIdentityAction::CreateNew);
+    BOOST_CHECK_EQUAL(OnionPrivateKeyForAdd(created), "NEW:ED25519-V3");
+    BOOST_CHECK(!fs::exists(missing));
+
+    const fs::path valid = dir / "onion_v3_private_key";
+    const std::string key = "ED25519-V3:abcdefghijklmnopqrstuvwxyz0123456789ABCD=";
+    {
+        std::ofstream out(valid);
+        out << key << "\n";
+    }
+    const OnionIdentityDecision reused = LoadOnionIdentity(valid);
+    BOOST_CHECK(reused.action == OnionIdentityAction::UseExisting);
+    BOOST_CHECK_EQUAL(reused.key, key);
+    BOOST_CHECK_EQUAL(OnionPrivateKeyForAdd(reused), key);
+    const OnionIdentityDecision reused_again = LoadOnionIdentity(valid);
+    BOOST_CHECK_EQUAL(reused_again.key, reused.key);
+    BOOST_CHECK_EQUAL(ReadBinaryFile(valid).second, key + "\n");
+
+    const fs::path invalid = dir / "invalid_onion_v3_private_key";
+    const std::string invalid_body = "not-an-ed25519-key\n";
+    {
+        std::ofstream out(invalid);
+        out << invalid_body;
+    }
+    const OnionIdentityDecision refused = LoadOnionIdentity(invalid);
+    BOOST_CHECK(refused.action == OnionIdentityAction::RefuseExisting);
+    BOOST_CHECK(OnionPrivateKeyForAdd(refused).empty());
+    BOOST_CHECK_EQUAL(ReadBinaryFile(invalid).second, invalid_body);
+
+#ifndef WIN32
+    if (::geteuid() != 0) {
+        const fs::path unreadable = dir / "unreadable_onion_v3_private_key";
+        {
+            std::ofstream out(unreadable);
+            out << key << "\n";
+        }
+        BOOST_CHECK_EQUAL(::chmod(fs::PathToString(unreadable).c_str(), 0), 0);
+        const OnionIdentityDecision blocked = LoadOnionIdentity(unreadable);
+        BOOST_CHECK(blocked.action == OnionIdentityAction::RefuseExisting);
+        BOOST_CHECK(OnionPrivateKeyForAdd(blocked).empty());
+        BOOST_CHECK_EQUAL(::chmod(fs::PathToString(unreadable).c_str(), 0600), 0);
+        BOOST_CHECK_EQUAL(ReadBinaryFile(unreadable).second, key + "\n");
+    }
+#endif
+    fs::remove_all(dir);
+}
+
+BOOST_AUTO_TEST_CASE(bootstrap_progress_is_not_connectivity)
+{
+    BOOST_CHECK(!ParseBootstrapProgress("starting"));
+    BOOST_CHECK_EQUAL(ParseBootstrapProgress("PROGRESS=0 TAG=starting").value_or(-1), 0);
+    BOOST_CHECK_EQUAL(ParseBootstrapProgress("NOTICE PROGRESS=80").value_or(-1), 80);
+    BOOST_CHECK_EQUAL(ParseBootstrapProgress("PROGRESS=100").value_or(-1), 100);
+    BOOST_CHECK(!ParseBootstrapProgress("PROGRESS=101"));
+    TorServiceStatus status;
+    status.bootstrap_percent = 100;
+    status.bootstrap_complete = true;
+    BOOST_CHECK(!status.onion_service_active);
+    BOOST_CHECK(!status.authenticated);
+    BOOST_CHECK_EQUAL(status.onion_peers_in, 0);
+    BOOST_CHECK(!status.network_active);
+}
+
+BOOST_AUTO_TEST_CASE(protocolinfo_requires_tor_evidence)
+{
+    std::string methods;
+    const std::vector<std::string> tor_lines{
+        "AUTH METHODS=SAFECOOKIE,NULL",
+        "VERSION Tor=\"0.4.8.10\"",
+    };
+    BOOST_CHECK(TorProtocolInfoIsTor(250, tor_lines, methods));
+    BOOST_CHECK_EQUAL(methods, "SAFECOOKIE,NULL");
+    BOOST_CHECK(!TorProtocolInfoIsTor(250, {"AUTH METHODS=NULL"}, methods));
+    BOOST_CHECK(!TorProtocolInfoIsTor(250, {"250 OK"}, methods));
+    BOOST_CHECK(!TorProtocolInfoIsTor(510, tor_lines, methods));
+}
+
+BOOST_AUTO_TEST_CASE(probe_pairs_stay_on_loopback_and_are_capped)
+{
+    const std::vector<TorProbePair> remote = BuildTorProbePairs("192.168.1.2", 9050, "192.168.1.2", 9051);
+    BOOST_CHECK_EQUAL(remote.size(), 2);
+    BOOST_CHECK_EQUAL(remote[0].socks_port, 9050);
+    BOOST_CHECK_EQUAL(remote[1].socks_port, 9150);
+    const std::vector<TorProbePair> saved = BuildTorProbePairs("127.0.0.1", 9250, "127.0.0.1", 9251);
+    BOOST_CHECK_EQUAL(saved.size(), 3);
+    BOOST_CHECK_EQUAL(saved[0].socks_port, 9250);
+    const std::vector<TorProbePair> duplicate = BuildTorProbePairs("127.0.0.1", 9050, "127.0.0.1", 9051);
+    BOOST_CHECK_EQUAL(duplicate.size(), 2);
+
+    TorProbePair refused;
+    refused.socks_host = "8.8.8.8";
+    refused.socks_port = 9050;
+    refused.control_host = "8.8.8.8";
+    refused.control_port = 9051;
+    const std::vector<TorProbePair> skipped = ProbeExistingTor({refused}, 200);
+    BOOST_CHECK_EQUAL(skipped.size(), 1);
+    BOOST_CHECK(skipped[0].skipped_non_loopback);
+    BOOST_CHECK(!skipped[0].socks_tcp);
+    BOOST_CHECK(!skipped[0].control_tcp);
+}
+
+BOOST_AUTO_TEST_CASE(probe_requires_protocol_evidence_and_sends_only_protocolinfo)
+{
+    std::atomic<uint16_t> socks_port{0};
+    std::atomic<uint16_t> control_port{0};
+    std::string socks_bytes;
+    std::string control_bytes;
+    std::thread socks([&] { ServeOnce(socks_port, socks_bytes, std::string("\x05\x00", 2)); });
+    std::thread control([&] {
+        ServeOnce(control_port, control_bytes,
+            "250-AUTH METHODS=SAFECOOKIE,NULL\r\n250-VERSION Tor=\"0.4.8.10\"\r\n250 OK\r\n");
+    });
+    while (socks_port.load() == 0 || control_port.load() == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const std::string proxy_before = gArgs.GetArg("-proxy", "");
+    TorProbePair requested;
+    requested.socks_host = "127.0.0.1";
+    requested.socks_port = socks_port.load();
+    requested.control_host = "127.0.0.1";
+    requested.control_port = control_port.load();
+    const std::vector<TorProbePair> found = ProbeExistingTor({requested}, 2000);
+    socks.join();
+    control.join();
+    BOOST_CHECK_EQUAL(found.size(), 1);
+    BOOST_CHECK(found[0].socks_tcp);
+    BOOST_CHECK(found[0].socks_greeting_ok);
+    BOOST_CHECK(found[0].control_tcp);
+    BOOST_CHECK(found[0].control_is_tor);
+    BOOST_CHECK_EQUAL(socks_bytes, std::string("\x05\x01\x00", 3));
+    BOOST_CHECK_EQUAL(control_bytes, "PROTOCOLINFO 1\r\n");
+    BOOST_CHECK(control_bytes.find("AUTHENTICATE") == std::string::npos);
+    BOOST_CHECK(control_bytes.find("ADD_ONION") == std::string::npos);
+    BOOST_CHECK(control_bytes.find("DEL_ONION") == std::string::npos);
+    BOOST_CHECK_EQUAL(gArgs.GetArg("-proxy", ""), proxy_before);
+    BOOST_CHECK(GetTorServiceStatus().runtime_detected);
+    BOOST_CHECK(!GetTorServiceStatus().authenticated);
+    BOOST_CHECK(!GetTorServiceStatus().onion_service_active);
+}
+
+BOOST_AUTO_TEST_CASE(probe_rejects_open_port_that_is_not_tor)
+{
+    std::atomic<uint16_t> socks_port{0};
+    std::atomic<uint16_t> control_port{0};
+    std::string socks_bytes;
+    std::string control_bytes;
+    std::thread socks([&] { ServeOnce(socks_port, socks_bytes, "hello"); });
+    std::thread control([&] { ServeOnce(control_port, control_bytes, "250 OK\r\n"); });
+    while (socks_port.load() == 0 || control_port.load() == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    TorProbePair requested;
+    requested.socks_host = "127.0.0.1";
+    requested.socks_port = socks_port.load();
+    requested.control_host = "127.0.0.1";
+    requested.control_port = control_port.load();
+    const std::vector<TorProbePair> found = ProbeExistingTor({requested}, 2000);
+    socks.join();
+    control.join();
+    BOOST_CHECK(found[0].socks_tcp);
+    BOOST_CHECK(!found[0].socks_greeting_ok);
+    BOOST_CHECK(found[0].control_tcp);
+    BOOST_CHECK(!found[0].control_is_tor);
+    BOOST_CHECK(socks_bytes.find(std::string("\x05\x01\x00\x01", 4)) == std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(tor_only_mode_does_not_infer_clearnet)
+{
+    TorModeInputs only_tor;
+    only_tor.listen_onion = true;
+    only_tor.onlynet_onion_only = true;
+    only_tor.bind_is_onion_only = true;
+    BOOST_CHECK(InferTorNetworkMode(only_tor) == TorNetworkMode::TorOnly);
+    TorModeInputs clearnet;
+    clearnet.listen = true;
+    BOOST_CHECK(InferTorNetworkMode(clearnet) == TorNetworkMode::Normal);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

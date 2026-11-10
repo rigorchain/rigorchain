@@ -18,6 +18,7 @@
 #include <net.h>
 #include <netbase.h>
 #include <tor_mode.h>
+#include <torcontrol.h>
 #include <txdb.h>       // for -dbcache defaults
 #include <util/string.h>
 #include <util/system.h>
@@ -732,8 +733,11 @@ TorNetworkMode OptionsModel::detectedTorNetworkMode() const
 void OptionsModel::applyTorNetworkMode(TorNetworkMode mode, const QString& socks_host, int socks_port,
                                        const QString& control_host, int control_port, const QString& password)
 {
-    const std::string socks = QString("%1:%2").arg(socks_host).arg(socks_port).toStdString();
-    const std::string control = QString("%1:%2").arg(control_host).arg(control_port).toStdString();
+    if (!IsLoopbackTorHost(socks_host.trimmed().toStdString()) || !IsLoopbackTorHost(control_host.trimmed().toStdString())) {
+        return;
+    }
+    const std::string socks = QString("%1:%2").arg(socks_host.trimmed()).arg(socks_port).toStdString();
+    const std::string control = QString("%1:%2").arg(control_host.trimmed()).arg(control_port).toStdString();
     auto set = [&](const std::string& name, const util::SettingsValue& value) {
         node().updateRwSetting(name, value);
     };

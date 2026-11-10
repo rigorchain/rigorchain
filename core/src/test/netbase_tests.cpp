@@ -9,11 +9,16 @@
 #include <protocol.h>
 #include <serialize.h>
 #include <streams.h>
+#include <test/util/net.h>
 #include <test/util/setup_common.h>
+#include <util/sock.h>
 #include <util/strencodings.h>
 #include <util/translation.h>
 #include <version.h>
 
+#include <cassert>
+#include <cerrno>
+#include <cstring>
 #include <string>
 
 #include <boost/test/unit_test.hpp>
@@ -617,6 +622,81 @@ BOOST_AUTO_TEST_CASE(isbadport)
         }
     }
     BOOST_CHECK_EQUAL(total_bad_ports, 85);
+}
+
+class GreetingSock : public Sock
+{
+public:
+    GreetingSock(std::string reply, bool close_immediately, bool block)
+        : m_reply(std::move(reply)), m_close(close_immediately), m_block(block)
+    {
+        m_socket = INVALID_SOCKET - 1;
+    }
+    ~GreetingSock() override { m_socket = INVALID_SOCKET; }
+    GreetingSock& operator=(Sock&&) override
+    {
+        assert(false && "Move of Sock into GreetingSock not allowed.");
+        return *this;
+    }
+    ssize_t Send(const void* data, size_t len, int) const override
+    {
+        m_sent.append(static_cast<const char*>(data), len);
+        return static_cast<ssize_t>(len);
+    }
+    ssize_t Recv(void* buf, size_t len, int) const override
+    {
+        if (m_block) {
+#ifdef WIN32
+            WSASetLastError(WSAEWOULDBLOCK);
+#else
+            errno = EWOULDBLOCK;
+#endif
+            return -1;
+        }
+        if (m_close || m_offset >= m_reply.size()) return 0;
+        const size_t n = std::min(len, m_reply.size() - m_offset);
+        std::memcpy(buf, m_reply.data() + m_offset, n);
+        m_offset += n;
+        return static_cast<ssize_t>(n);
+    }
+    bool Wait(std::chrono::milliseconds, Event, Event* occurred) const override
+    {
+        if (occurred != nullptr) *occurred = 0;
+        return !m_block;
+    }
+    const std::string& sent() const { return m_sent; }
+
+private:
+    std::string m_reply;
+    bool m_close;
+    bool m_block;
+    mutable std::string m_sent;
+    mutable size_t m_offset{0};
+};
+
+BOOST_AUTO_TEST_CASE(socks5_greeting_does_not_connect)
+{
+    GreetingSock ok(std::string("\x05\x00", 2), false, false);
+    const Socks5GreetingResult success = Socks5Greeting(ok, nullptr, 50);
+    BOOST_CHECK(success.ok);
+    BOOST_CHECK_EQUAL(success.method, 0x00);
+    BOOST_CHECK_EQUAL(ok.sent(), std::string("\x05\x01\x00", 3));
+
+    GreetingSock rejected(std::string("\x04\x00", 2), false, false);
+    const Socks5GreetingResult bad_version = Socks5Greeting(rejected, nullptr, 50);
+    BOOST_CHECK(!bad_version.ok);
+    BOOST_CHECK(bad_version.version_rejected);
+
+    GreetingSock closed("", true, false);
+    const Socks5GreetingResult dropped = Socks5Greeting(closed, nullptr, 50);
+    BOOST_CHECK(!dropped.ok);
+    BOOST_CHECK(dropped.io_failed);
+
+    GreetingSock silent("", false, true);
+    const Socks5GreetingResult timed_out = Socks5Greeting(silent, nullptr, 30);
+    BOOST_CHECK(!timed_out.ok);
+    BOOST_CHECK(timed_out.io_failed);
+    BOOST_CHECK_EQUAL(silent.sent(), std::string("\x05\x01\x00", 3));
 }
 
 BOOST_AUTO_TEST_CASE(netbase_rfc9637_documentation_prefix)
