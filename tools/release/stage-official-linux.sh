@@ -60,7 +60,9 @@ for b in rigord rigor-cli qt/rigor-qt; do
   fi
 done
 for b in rigord qt/rigor-qt; do
-  nm "${BUILD}/src/${b}" | grep -q ' T sodium_version_string$' \
+  # grep -q under pipefail returns 141: nm receives SIGPIPE after the first match.
+  sodium_sym="$(nm "${BUILD}/src/${b}" | grep ' T sodium_version_string$' || true)"
+  [[ -n "${sodium_sym}" ]] \
     || die "${b} does not embed libsodium; rebuild with the pinned static copy (FORCE=1)"
 done
 cp -a "${BUILD}/src/rigord" "${OUT}/rigord"
