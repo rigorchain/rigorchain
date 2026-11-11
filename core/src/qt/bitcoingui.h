@@ -30,6 +30,7 @@
 #include <qt/macos_appnap.h>
 #endif
 
+#include <cstdint>
 #include <memory>
 
 class NetworkStyle;
@@ -222,6 +223,8 @@ private:
     QString networkStatusPlain() const;
 
     bool m_seed_watch_started{false};
+    //! Id returned by WatchConfiguredSeeds. 0 means this window has no watcher.
+    std::uint64_t m_seed_watcher_id{0};
 
     void updateHeadersSyncProgressLabel();
     void updateHeadersPresyncProgressLabel(int64_t height, const QDateTime& blockDate);

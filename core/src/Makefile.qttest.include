@@ -11,7 +11,8 @@ TEST_QT_MOC_CPP = \
   qt/test/moc_optiontests.cpp \
   qt/test/moc_rpcnestedtests.cpp \
   qt/test/moc_uritests.cpp \
-  qt/test/moc_tipnotifytests.cpp
+  qt/test/moc_tipnotifytests.cpp \
+  qt/test/moc_peertablemodeltests.cpp
 
 if ENABLE_WALLET
 TEST_QT_MOC_CPP += \
@@ -27,6 +28,7 @@ TEST_QT_H = \
   qt/test/rpcnestedtests.h \
   qt/test/tipnotifytests.h \
   qt/test/uritests.h \
+  qt/test/peertablemodeltests.h \
   qt/test/util.h \
   qt/test/wallettests.h \
   qt/test/dualitystatisticstests.h
@@ -42,6 +44,7 @@ qt_test_test_rigor_qt_SOURCES = \
   qt/test/test_main.cpp \
   qt/test/tipnotifytests.cpp \
   qt/test/uritests.cpp \
+  qt/test/peertablemodeltests.cpp \
   qt/test/util.cpp \
   $(TEST_QT_H)
 if ENABLE_WALLET

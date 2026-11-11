@@ -17,6 +17,7 @@
 #include <QStringList>
 #include <QVariant>
 
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -121,11 +122,25 @@ private:
             User Agent string. */
         tr("User Agent")};
     QTimer* timer{nullptr};
+    //! Id of this model's entry in the process-wide seed watcher list. 0 means none.
+    std::uint64_t m_seed_watcher_id{0};
 };
 
-/** Start DNS lookups for configured seeds once. on_change runs after each lookup. */
-void WatchConfiguredSeeds(const std::function<void()>& on_change);
+/** Register on_change and, unless a test has disabled it, start the shared seed lookups once.
+ *  Returns an id for UnwatchConfiguredSeeds. Returns 0 when on_change is empty.
+ *  The QHostInfo lookups are process-wide. They are not owned by the caller, and
+ *  unregistering a watcher does not abort them. */
+std::uint64_t WatchConfiguredSeeds(const std::function<void()>& on_change);
+/** Remove one watcher. A second call with the same id does nothing. Id 0 does nothing. */
+void UnwatchConfiguredSeeds(std::uint64_t watcher_id);
 std::vector<ConfiguredSeedLookup> ConfiguredSeedSnapshot();
 QString UniqueSeedLabelForIp(const QString& ip);
+
+/** Test seam. When false, watchers are still registered but no QHostInfo lookup is started.
+ *  Production leaves this true. */
+void SetConfiguredSeedLookupsEnabledForTest(bool enabled);
+/** Deliver the same watcher notification a finished lookup would deliver. Does not start DNS. */
+void NotifyConfiguredSeedWatchersForTest();
+int ConfiguredSeedWatcherCountForTest();
 
 #endif // BITCOIN_QT_PEERTABLEMODEL_H

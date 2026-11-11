@@ -10,6 +10,8 @@
 #include <interfaces/node.h>
 #include <chainparams.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <utility>
 
 #include <QAbstractSocket>
@@ -17,6 +19,7 @@
 #include <QHostAddress>
 #include <QHostInfo>
 #include <QList>
+#include <QPointer>
 #include <QTimer>
 
 struct SeedCacheRow {
@@ -24,9 +27,16 @@ struct SeedCacheRow {
     bool finished{false};
     QStringList addresses;
 };
+struct SeedWatcher {
+    std::uint64_t id{0};
+    std::function<void()> callback;
+};
+
 static QList<SeedCacheRow> g_seed_rows;
-static QList<std::function<void()>> g_seed_watchers;
+static std::vector<SeedWatcher> g_seed_watchers;
+static std::uint64_t g_next_seed_watcher_id{1};
 static bool g_seed_lookups_started = false;
+static bool g_seed_lookups_enabled = true;
 
 static std::vector<ConfiguredSeedLookup> SeedSnapshot()
 {
@@ -47,25 +57,41 @@ static std::vector<ConfiguredSeedLookup> SeedSnapshot()
 
 static void NotifySeedWatchers()
 {
-    const QList<std::function<void()>> watchers = g_seed_watchers;
-    for (const std::function<void()>& watcher : watchers) {
-        if (watcher) watcher();
+    // Copy ids first. A callback may unregister another watcher, including
+    // itself, before this loop reaches it. Look up the live callback so an
+    // id removed by ~PeerTableModel is not invoked.
+    std::vector<std::uint64_t> ids;
+    ids.reserve(g_seed_watchers.size());
+    for (const SeedWatcher& watcher : g_seed_watchers) {
+        ids.push_back(watcher.id);
+    }
+    for (const std::uint64_t id : ids) {
+        std::function<void()> callback;
+        for (const SeedWatcher& watcher : g_seed_watchers) {
+            if (watcher.id == id) {
+                callback = watcher.callback;
+                break;
+            }
+        }
+        if (callback) callback();
     }
 }
 
-void WatchConfiguredSeeds(const std::function<void()>& on_change)
+std::uint64_t WatchConfiguredSeeds(const std::function<void()>& on_change)
 {
-    if (on_change) g_seed_watchers.append(on_change);
+    if (!on_change) return 0;
+    const std::uint64_t id = g_next_seed_watcher_id++;
+    if (g_next_seed_watcher_id == 0) ++g_next_seed_watcher_id;
+    g_seed_watchers.push_back(SeedWatcher{id, on_change});
+    if (!g_seed_lookups_enabled) return id;
     if (g_seed_lookups_started || !qApp) {
-        if (on_change) {
-            for (const SeedCacheRow& row : g_seed_rows) {
-                if (row.finished) {
-                    on_change();
-                    break;
-                }
+        for (const SeedCacheRow& row : g_seed_rows) {
+            if (row.finished) {
+                on_change();
+                break;
             }
         }
-        return;
+        return id;
     }
     g_seed_lookups_started = true;
     for (const std::string& raw : Params().DNSSeeds()) {
@@ -90,6 +116,30 @@ void WatchConfiguredSeeds(const std::function<void()>& on_change)
             NotifySeedWatchers();
         });
     }
+    return id;
+}
+
+void UnwatchConfiguredSeeds(std::uint64_t watcher_id)
+{
+    if (watcher_id == 0) return;
+    const auto remove = std::remove_if(g_seed_watchers.begin(), g_seed_watchers.end(),
+                                        [watcher_id](const SeedWatcher& watcher) { return watcher.id == watcher_id; });
+    g_seed_watchers.erase(remove, g_seed_watchers.end());
+}
+
+void SetConfiguredSeedLookupsEnabledForTest(bool enabled)
+{
+    g_seed_lookups_enabled = enabled;
+}
+
+void NotifyConfiguredSeedWatchersForTest()
+{
+    NotifySeedWatchers();
+}
+
+int ConfiguredSeedWatcherCountForTest()
+{
+    return static_cast<int>(g_seed_watchers.size());
 }
 
 std::vector<ConfiguredSeedLookup> ConfiguredSeedSnapshot()
@@ -115,15 +165,25 @@ PeerTableModel::PeerTableModel(interfaces::Node& node, QObject* parent)
 
     // load initial data
     refresh();
-    WatchConfiguredSeeds([this] {
-        if (rowCount() <= 0) return;
-        const QModelIndex top_left = index(0, Seed);
-        const QModelIndex bottom_right = index(rowCount() - 1, Seed);
-        Q_EMIT dataChanged(top_left, bottom_right);
+    // QPointer becomes null once QObject destruction finishes. Combined with
+    // UnwatchConfiguredSeeds, a callback already copied by QHostInfo cannot
+    // call into this model after it is gone. The lookup itself stays running:
+    // it is shared by every model and uses qApp as its Qt receiver.
+    QPointer<PeerTableModel> self(this);
+    m_seed_watcher_id = WatchConfiguredSeeds([self] {
+        if (!self) return;
+        if (self->rowCount() <= 0) return;
+        const QModelIndex top_left = self->index(0, PeerTableModel::Seed);
+        const QModelIndex bottom_right = self->index(self->rowCount() - 1, PeerTableModel::Seed);
+        Q_EMIT self->dataChanged(top_left, bottom_right);
     });
 }
 
-PeerTableModel::~PeerTableModel() = default;
+PeerTableModel::~PeerTableModel()
+{
+    UnwatchConfiguredSeeds(m_seed_watcher_id);
+    m_seed_watcher_id = 0;
+}
 
 void PeerTableModel::startAutoRefresh()
 {

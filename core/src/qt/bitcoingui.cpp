@@ -6,6 +6,8 @@
 #include <qt/peertablemodel.h>
 #include <qt/seedlabel.h>
 
+#include <QPointer>
+
 #include <qt/rigorwallet/walletidentity.h>
 
 #include <qt/bitcoinunits.h>
@@ -261,6 +263,11 @@ RigorGUI::RigorGUI(interfaces::Node& node, const PlatformStyle *_platformStyle, 
 
 RigorGUI::~RigorGUI()
 {
+    // Drop this window's seed callback before tearing the window down. The
+    // shared QHostInfo lookups keep running for any other watcher.
+    UnwatchConfiguredSeeds(m_seed_watcher_id);
+    m_seed_watcher_id = 0;
+
     // Unsubscribe from notifications from core
     unsubscribeFromCoreSignals();
 
@@ -1075,7 +1082,11 @@ void RigorGUI::requestSeedLookups()
 {
     if (m_seed_watch_started) return;
     m_seed_watch_started = true;
-    WatchConfiguredSeeds([this] { updateNetworkState(); });
+    QPointer<RigorGUI> self(this);
+    m_seed_watcher_id = WatchConfiguredSeeds([self] {
+        if (!self) return;
+        self->updateNetworkState();
+    });
 }
 
 QString RigorGUI::networkStatusPlain() const
