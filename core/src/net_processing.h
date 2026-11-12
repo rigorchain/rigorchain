@@ -25,6 +25,10 @@ static const int DISCOURAGEMENT_THRESHOLD{100};
 static const unsigned int MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK = 3;
 /** Maximum concurrent compact-block reconstructions requested from one peer. */
 static const unsigned int MAX_PARALLEL_COMPACT_REQUESTS_PER_PEER = 3;
+/** Replaceable transaction announcements retained for one send-paused peer.
+ *  This is INVENTORY_BROADCAST_MAX; net_processing.cpp static_asserts that.
+ */
+static constexpr unsigned int PAUSED_TX_INVENTORY_LIMIT = 35;
 
 struct CNodeStateStats {
     int nSyncHeight = -1;
@@ -72,6 +76,21 @@ public:
 
     /** Relay transaction to all peers. */
     virtual void RelayTransaction(const uint256& txid, const uint256& wtxid) = 0;
+
+    /** Queued transaction announcement hashes for one peer. Public for tests. */
+    virtual size_t GetTxAnnouncementCount(NodeId nodeid) = 0;
+
+    /** Queued block announcement hashes for one peer. Public for tests. */
+    virtual size_t GetBlockAnnouncementCount(NodeId nodeid) = 0;
+
+    /** Newest queued header-announcement hash, or null if that queue is empty. */
+    virtual uint256 GetNewestBlockAnnouncement(NodeId nodeid) = 0;
+
+    /** Unsent getblocks inventories for one peer. Not part of the announcement cap. */
+    virtual size_t GetGetBlocksResponseCount(NodeId nodeid) = 0;
+
+    /** Queue one tip announcement the same way a connected block does. Public for tests. */
+    virtual void TestAnnounceBlockTip(const CBlockIndex* tip) = 0;
 
     /** Send ping message to all peers */
     virtual void SendPings() = 0;

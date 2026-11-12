@@ -25,9 +25,18 @@ bool FileCommit(FILE* file);
  */
 void DirectoryCommit(const fs::path& dirname);
 
-bool TruncateFile(FILE* file, unsigned int length);
+bool TruncateFile(FILE* file, uint64_t length);
+
+/** Seek to a 64-bit offset. Returns 0 on success and -1 on failure.
+ *  An offset that does not fit in the platform file-position type fails
+ *  instead of being narrowed. */
+int FileSeek64(FILE* file, int64_t offset, int origin);
+
+/** Current file position, or -1 on failure. */
+int64_t FileTell64(FILE* file);
+
 int RaiseFileDescriptorLimit(int nMinFD);
-void AllocateFileRange(FILE* file, unsigned int offset, unsigned int length);
+void AllocateFileRange(FILE* file, uint64_t offset, uint64_t length);
 
 /**
  * Rename src to dest.

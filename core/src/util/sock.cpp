@@ -14,6 +14,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #ifdef WIN32
 #include <codecvt>
@@ -211,20 +212,43 @@ bool Sock::WaitMany(std::chrono::milliseconds timeout, EventsPerSock& events_per
     FD_ZERO(&send);
     FD_ZERO(&err);
     SOCKET socket_max{0};
+    bool any_requested{false};
 
     for (const auto& [sock, events] : events_per_sock) {
         if (!sock->IsSelectable()) {
             return false;
         }
         const auto& s = sock->m_socket;
+        // select() reports TCP urgent data as an exceptional condition. Watching
+        // that condition while a read was not requested lets a paused peer bypass
+        // receive backpressure (CVE-2026-117350). poll() does not treat urgent
+        // data as POLLERR, so the Linux backend is unchanged.
         if (events.requested & RECV) {
             FD_SET(s, &recv);
+            FD_SET(s, &err);
+            any_requested = true;
         }
         if (events.requested & SEND) {
             FD_SET(s, &send);
+            any_requested = true;
         }
-        FD_SET(s, &err);
-        socket_max = std::max(socket_max, s);
+        if (events.requested & (RECV | SEND)) {
+            socket_max = std::max(socket_max, s);
+        }
+    }
+
+    // Sock::Wait documents a timeout as success with occurred == 0. Windows
+    // select() returns WSAEINVAL when every fd_set is empty, so a zero-request
+    // wait cannot call select(). Sockets that did request RECV or SEND still
+    // go through select() below; this branch does not run for them.
+    if (!any_requested) {
+        for (auto& [sock, events] : events_per_sock) {
+            events.occurred = 0;
+        }
+        if (timeout > 0ms) {
+            std::this_thread::sleep_for(timeout);
+        }
+        return true;
     }
 
     timeval tv = MillisToTimeval(timeout);

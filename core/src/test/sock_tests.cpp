@@ -11,6 +11,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <cassert>
+#include <cstdint>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -158,5 +159,85 @@ BOOST_AUTO_TEST_CASE(recv_until_terminator_limit)
 }
 
 #endif /* WIN32 */
+
+static Sock MakeListenSock(uint16_t& port_out)
+{
+    const SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    BOOST_REQUIRE(fd != static_cast<SOCKET>(SOCKET_ERROR));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    BOOST_REQUIRE_EQUAL(bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    BOOST_REQUIRE_EQUAL(listen(fd, 1), 0);
+    socklen_t len = sizeof(addr);
+    BOOST_REQUIRE_EQUAL(getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len), 0);
+    port_out = ntohs(addr.sin_port);
+    return Sock(fd);
+}
+
+static Sock ConnectLoopback(uint16_t port)
+{
+    const SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    BOOST_REQUIRE(fd != static_cast<SOCKET>(SOCKET_ERROR));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
+    BOOST_REQUIRE_EQUAL(connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    return Sock(fd);
+}
+
+static Sock AcceptOne(Sock& listener)
+{
+    const SOCKET fd = accept(listener.Get(), nullptr, nullptr);
+    BOOST_REQUIRE(fd != static_cast<SOCKET>(SOCKET_ERROR));
+    return Sock(fd);
+}
+
+// CVE-2026-117350: a paused read must not be woken by TCP urgent data, and a
+// later requested read must still observe bytes that arrived during the pause.
+BOOST_AUTO_TEST_CASE(paused_read_ignores_urgent_data)
+{
+    uint16_t port{0};
+    Sock listener = MakeListenSock(port);
+    Sock client = ConnectLoopback(port);
+    Sock server = AcceptOne(listener);
+
+    BOOST_CHECK_EQUAL(client.Send("N", 1, MSG_NOSIGNAL), 1);
+    Sock::Event occurred{0};
+    BOOST_CHECK(server.Wait(2s, Sock::RECV, &occurred));
+    BOOST_CHECK(occurred & Sock::RECV);
+    char buf[8];
+    BOOST_CHECK_EQUAL(server.Recv(buf, sizeof(buf), MSG_DONTWAIT), 1);
+    BOOST_CHECK_EQUAL(buf[0], 'N');
+
+    BOOST_CHECK_EQUAL(client.Send("P", 1, MSG_NOSIGNAL), 1);
+    occurred = Sock::RECV | Sock::ERR;
+    BOOST_CHECK(server.Wait(200ms, 0, &occurred));
+    BOOST_CHECK_EQUAL(occurred, 0);
+    BOOST_CHECK(server.Wait(2s, Sock::RECV, &occurred));
+    BOOST_CHECK(occurred & Sock::RECV);
+    BOOST_CHECK_EQUAL(server.Recv(buf, sizeof(buf), MSG_DONTWAIT), 1);
+    BOOST_CHECK_EQUAL(buf[0], 'P');
+
+    const char urgent{'U'};
+    const ssize_t urgent_sent = client.Send(&urgent, 1, MSG_OOB | MSG_NOSIGNAL);
+    BOOST_REQUIRE_EQUAL(urgent_sent, 1);
+    occurred = Sock::RECV | Sock::ERR;
+    BOOST_CHECK(server.Wait(200ms, 0, &occurred));
+    BOOST_CHECK_EQUAL(occurred, 0);
+    occurred = 0;
+    BOOST_CHECK(server.Wait(200ms, Sock::SEND, &occurred));
+    BOOST_CHECK_EQUAL(occurred & (Sock::RECV | Sock::ERR), 0);
+
+    BOOST_CHECK_EQUAL(client.Send("R", 1, MSG_NOSIGNAL), 1);
+    occurred = 0;
+    BOOST_CHECK(server.Wait(2s, Sock::RECV, &occurred));
+    BOOST_CHECK(occurred & Sock::RECV);
+    const ssize_t n = server.Recv(buf, sizeof(buf), MSG_DONTWAIT);
+    BOOST_CHECK(n >= 1);
+    BOOST_CHECK_EQUAL(buf[0], 'R');
+}
 
 BOOST_AUTO_TEST_SUITE_END()

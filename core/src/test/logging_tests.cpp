@@ -8,9 +8,13 @@
 #include <test/util/setup_common.h>
 #include <util/string.h>
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -273,6 +277,199 @@ BOOST_FIXTURE_TEST_CASE(attacker_controlled_logs_are_rate_limited, LogSetup)
     BOOST_CHECK_EQUAL(count("Invalid chain:"), 1U);
     BOOST_CHECK_EQUAL(count("ordinary operator note"), 4U);
     BOOST_CHECK(contents.find("rate-limited attacker-controlled log") != std::string::npos);
+    ResetAttackerLogRateLimitForTest();
+}
+
+BOOST_FIXTURE_TEST_CASE(attacker_header_logs_are_rate_limited, LogSetup)
+{
+    ResetAttackerLogRateLimitForTest();
+    SetAttackerLogQuotaForTest(40);
+
+    const char* bad_diffbits = "ERROR: bad-diffbits: got=0x%08x expect=0x%08x nTime=%u height=%d\n";
+    const char* checkpoint_fork = "ERROR: %s: forked chain older than last checkpoint (height %d)\n";
+    LogPrintf(bad_diffbits, 1u, 2u, 3u, 4);
+    LogPrintf(bad_diffbits, 1u, 2u, 3u, 5);
+    LogPrintf(bad_diffbits, 1u, 2u, 3u, 6);
+    LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 1);
+    LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 2);
+    LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 3);
+    LogPrintf("ordinary operator note %d\n", 9);
+
+    const auto count_in = [](const std::string& contents, const std::string& needle) {
+        size_t found = 0;
+        for (size_t pos = 0; (pos = contents.find(needle, pos)) != std::string::npos; pos += needle.size()) {
+            ++found;
+        }
+        return found;
+    };
+    std::ifstream file{tmp_log_path};
+    std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+    BOOST_CHECK_EQUAL(count_in(contents, "ERROR: bad-diffbits"), 1U);
+    BOOST_CHECK_EQUAL(count_in(contents, "forked chain older than last checkpoint"), 1U);
+    BOOST_CHECK_EQUAL(count_in(contents, "ordinary operator note"), 1U);
+
+    ResetAttackerLogRateLimitForTest();
+    SetAttackerLogQuotaForTest(40);
+    LogPrintf(bad_diffbits, 1u, 2u, 3u, 7);
+    LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 4);
+    LogPrintf(bad_diffbits, 1u, 2u, 3u, 8);
+    LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 5);
+
+    std::ifstream after{tmp_log_path};
+    std::string recovered((std::istreambuf_iterator<char>(after)), std::istreambuf_iterator<char>());
+    BOOST_CHECK_EQUAL(count_in(recovered, "ERROR: bad-diffbits"), 2U);
+    BOOST_CHECK_EQUAL(count_in(recovered, "forked chain older than last checkpoint"), 2U);
+    BOOST_CHECK_EQUAL(count_in(recovered, "ordinary operator note"), 1U);
+    ResetAttackerLogRateLimitForTest();
+}
+
+BOOST_FIXTURE_TEST_CASE(attacker_log_quotas_are_isolated, LogSetup)
+{
+    const char* bad_diffbits = "ERROR: bad-diffbits: got=0x%08x expect=0x%08x nTime=%u height=%d\n";
+    const char* checkpoint_fork = "ERROR: %s: forked chain older than last checkpoint (height %d)\n";
+    const auto read_log = [&]() {
+        std::ifstream file{tmp_log_path};
+        return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    };
+    const auto count_in = [](const std::string& contents, const std::string& needle) {
+        size_t found = 0;
+        for (size_t pos = 0; (pos = contents.find(needle, pos)) != std::string::npos; pos += needle.size()) {
+            ++found;
+        }
+        return found;
+    };
+    size_t baseline = read_log().size();
+    const auto fresh = [&]() {
+        const std::string contents = read_log();
+        return contents.size() >= baseline ? contents.substr(baseline) : contents;
+    };
+
+    ResetAttackerLogRateLimitForTest();
+    BOOST_CHECK_EQUAL(AttackerLogPeerQuotaForTest(), static_cast<size_t>(1024 * 1024));
+    BOOST_CHECK_EQUAL(AttackerLogGlobalQuotaForTest(), static_cast<size_t>(ATTACKER_LOG_GLOBAL_MULTIPLIER * 1024 * 1024));
+    LogPrintf("Error reading from database: phase2j isolation check\n");
+    LogPrintf("ERROR: ConnectBlock(): phase2j invariant check\n");
+    BOOST_CHECK_EQUAL(count_in(fresh(), "Error reading from database: phase2j"), 1U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: ConnectBlock(): phase2j"), 1U);
+
+    SetAttackerLogQuotaForTest(40);
+    {
+        AttackerLogPeerScope peer_a{1};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 1);
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 2);
+    }
+    {
+        AttackerLogPeerScope peer_b{2};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 3);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 2U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 1), 1U);
+
+    {
+        AttackerLogPeerScope peer_a{1};
+        LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 1);
+        LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 2);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "forked chain older than last checkpoint"), 1U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 2U);
+
+    ResetAttackerLogRateLimitForTest();
+    baseline = read_log().size();
+    SetAttackerLogQuotaForTest(1024 * 1024);
+    SetAttackerLogGlobalQuotaForTest(40);
+    {
+        AttackerLogPeerScope peer_a{4};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 4);
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 5);
+    }
+    {
+        AttackerLogPeerScope peer_b{5};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 6);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 1U);
+    {
+        AttackerLogPeerScope peer_b{5};
+        LogPrintf(checkpoint_fork, "ContextualCheckBlockHeader", 9);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "forked chain older than last checkpoint"), 1U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 1U);
+
+    ResetAttackerLogRateLimitForTest();
+    baseline = read_log().size();
+    SetAttackerLogQuotaForTest(40);
+    {
+        AttackerLogPeerScope peer_a{6};
+        for (int i = 0; i < 20; ++i) {
+            LogPrintf(bad_diffbits, 1u, 2u, 3u, i);
+        }
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 1U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "rate-limited attacker-controlled log"), 1U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 6), 19U);
+    ExpireAttackerLogWindowsForTest();
+    {
+        AttackerLogPeerScope peer_a{6};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 20);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "suppressed 19 messages in the previous window"), 1U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 2U);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "rate-limited attacker-controlled log"), 1U);
+
+    ResetAttackerLogRateLimitForTest();
+    baseline = read_log().size();
+    SetAttackerLogQuotaForTest(40);
+    {
+        AttackerLogPeerScope peer_a{7};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 7);
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 8);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 1U);
+    BOOST_CHECK(AttackerLogPeerSlotCountForTest() >= 1U);
+    ReleaseAttackerLogPeer(7);
+    BOOST_CHECK_EQUAL(count_in(fresh(), "suppressed 1 messages in the previous window"), 1U);
+    BOOST_CHECK_EQUAL(AttackerLogPeerSlotCountForTest(), 0U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 7), 0U);
+    {
+        AttackerLogPeerScope peer_a{7};
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 9);
+        LogPrintf(bad_diffbits, 1u, 2u, 3u, 10);
+    }
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 2U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 7), 1U);
+
+    ResetAttackerLogRateLimitForTest();
+    for (int64_t id = 1000; id < 1200; ++id) {
+        AttackerLogPeerScope scope{id};
+        LogPrintf(bad_diffbits, 1u, 2u, static_cast<unsigned>(id), 1);
+    }
+    BOOST_CHECK_EQUAL(AttackerLogPeerSlotCountForTest(), MAX_ATTACKER_LOG_PEERS);
+    for (int64_t id = 1000; id < 1200; ++id) {
+        ReleaseAttackerLogPeer(id);
+    }
+    BOOST_CHECK_EQUAL(AttackerLogPeerSlotCountForTest(), 0U);
+
+    ResetAttackerLogRateLimitForTest();
+    baseline = read_log().size();
+    SetAttackerLogQuotaForTest(40);
+    std::thread peer_one{[&]() {
+        AttackerLogPeerScope scope{50};
+        for (int i = 0; i < 30; ++i) {
+            LogPrintf(bad_diffbits, 1u, 2u, 3u, i);
+        }
+    }};
+    std::thread peer_two{[&]() {
+        AttackerLogPeerScope scope{51};
+        for (int i = 0; i < 30; ++i) {
+            LogPrintf(bad_diffbits, 1u, 2u, 3u, i);
+        }
+    }};
+    peer_one.join();
+    peer_two.join();
+    BOOST_CHECK_EQUAL(count_in(fresh(), "ERROR: bad-diffbits"), 2U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 50), 29U);
+    BOOST_CHECK_EQUAL(AttackerLogSuppressedCountForTest("bad-diffbits", 51), 29U);
+    BOOST_CHECK_EQUAL(AttackerLogPeerSlotCountForTest(), 2U);
     ResetAttackerLogRateLimitForTest();
 }
 

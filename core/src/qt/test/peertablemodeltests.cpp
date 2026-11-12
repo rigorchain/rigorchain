@@ -6,9 +6,13 @@
 
 #include <interfaces/node.h>
 #include <qt/peertablemodel.h>
+#include <qt/platformstyle.h>
+#include <qt/rpcconsole.h>
 
 #include <cstdint>
+#include <memory>
 
+#include <QLabel>
 #include <QTest>
 
 void PeerTableModelTests::initTestCase()
@@ -104,4 +108,25 @@ void PeerTableModelTests::unwatchIsIdempotentAndDoesNotCancelAnother()
     NotifyConfiguredSeedWatchersForTest();
     QCOMPARE(hits_a, 0);
     QCOMPARE(hits_b, 1);
+}
+
+void PeerTableModelTests::nullClientModelSkipsNetworkUpdate()
+{
+    std::unique_ptr<const PlatformStyle> platform_style(PlatformStyle::instantiate("other"));
+    QVERIFY(platform_style);
+    RPCConsole console(m_node, platform_style.get(), nullptr);
+    QLabel* connections = console.findChild<QLabel*>("numberOfConnections");
+    QVERIFY(connections != nullptr);
+    const QString before = connections->text();
+
+    // clientModel is still null. These are the slots a queued
+    // networkActiveChanged / numConnectionsChanged signal can invoke
+    // after setClientModel(nullptr).
+    console.setNetworkActive(false);
+    console.setNumConnections(0);
+    QCOMPARE(connections->text(), before);
+
+    console.setClientModel(nullptr, 0, 0, 0.0);
+    console.setNetworkActive(true);
+    QCOMPARE(connections->text(), before);
 }

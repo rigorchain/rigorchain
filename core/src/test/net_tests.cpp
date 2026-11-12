@@ -18,18 +18,21 @@
 #include <serialize.h>
 #include <span.h>
 #include <streams.h>
+#include <test/util/net.h>
 #include <test/util/setup_common.h>
 #include <test/util/validation.h>
 #include <timedata.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/system.h>
+#include <util/time.h>
 #include <validation.h>
 #include <version.h>
 
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <ios>
 #include <memory>
 #include <optional>
@@ -38,6 +41,395 @@
 using namespace std::literals;
 
 BOOST_FIXTURE_TEST_SUITE(net_tests, RegTestingSetup)
+
+BOOST_AUTO_TEST_CASE(paused_send_disconnects_after_timeout)
+{
+    struct RestoreMockTime {
+        ~RestoreMockTime() { SetMockTime(0s); }
+    } restore_mock_time;
+
+    // Protocol version 209 predates BIP31 nonce pings. RIGOR always sends a
+    // nonce and does not disconnect a peer for lacking that feature. A peer
+    // that stays send-paused is disconnected after TIMEOUT_INTERVAL even when
+    // partial sends keep m_last_send fresh.
+    const auto start = std::chrono::seconds{1'700'000'000};
+    SetMockTime(start);
+
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    connman.SetPeerConnectTimeout(1s);
+
+    in_addr ipv4Addr;
+    ipv4Addr.s_addr = 0xa0b0c001;
+    CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+    CNode legacy{/*id=*/1,
+                 /*sock=*/nullptr,
+                 addr,
+                 /*nKeyedNetGroupIn=*/0,
+                 /*nLocalHostNonceIn=*/0,
+                 CAddress{},
+                 /*addrNameIn=*/std::string{},
+                 ConnectionType::OUTBOUND_FULL_RELAY,
+                 /*inbound_onion=*/false};
+    legacy.nVersion = 209;
+    legacy.fSuccessfullyConnected = true;
+    legacy.m_last_send = start;
+    legacy.m_last_recv = start;
+
+    CNode healthy{/*id=*/2,
+                  /*sock=*/nullptr,
+                  addr,
+                  /*nKeyedNetGroupIn=*/1,
+                  /*nLocalHostNonceIn=*/1,
+                  CAddress{},
+                  /*addrNameIn=*/std::string{},
+                  ConnectionType::OUTBOUND_FULL_RELAY,
+                  /*inbound_onion=*/false};
+    healthy.nVersion = PROTOCOL_VERSION;
+    healthy.fSuccessfullyConnected = true;
+    healthy.m_last_send = start;
+    healthy.m_last_recv = start;
+
+    SetMockTime(start + 2s);
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    legacy.SetSendPaused(true);
+    const auto pause_started = legacy.m_pause_send_since.load();
+    BOOST_CHECK_EQUAL(pause_started.count(), (start + 2s).count());
+    legacy.SetSendPaused(true);
+    BOOST_CHECK_EQUAL(legacy.m_pause_send_since.load().count(), pause_started.count());
+
+    legacy.m_last_send = start + 2s;
+    legacy.m_last_recv = start + 2s;
+    BOOST_CHECK(legacy.fPauseSend);
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    SetMockTime(pause_started + TIMEOUT_INTERVAL);
+    legacy.m_last_send = pause_started + TIMEOUT_INTERVAL;
+    legacy.m_last_recv = pause_started + TIMEOUT_INTERVAL;
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    SetMockTime(pause_started + TIMEOUT_INTERVAL + 1s);
+    legacy.m_last_send = pause_started + TIMEOUT_INTERVAL + 1s;
+    legacy.m_last_recv = pause_started + TIMEOUT_INTERVAL + 1s;
+    BOOST_CHECK(connman.InactivityCheck(legacy));
+
+    legacy.SetSendPaused(false);
+    BOOST_CHECK(!legacy.fPauseSend);
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    const auto resumed = pause_started + TIMEOUT_INTERVAL + 1s;
+    legacy.SetSendPaused(true);
+    BOOST_CHECK_EQUAL(legacy.m_pause_send_since.load().count(), resumed.count());
+    legacy.m_last_send = resumed;
+    legacy.m_last_recv = resumed;
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    legacy.SetSendPaused(false);
+    SetMockTime(resumed + TIMEOUT_INTERVAL + 1s);
+    legacy.m_last_send = resumed + TIMEOUT_INTERVAL + 1s;
+    legacy.m_last_recv = resumed + TIMEOUT_INTERVAL + 1s;
+    BOOST_CHECK(!connman.InactivityCheck(legacy));
+
+    legacy.m_last_send = resumed;
+    BOOST_CHECK(connman.InactivityCheck(legacy));
+
+    const auto now = GetTime<std::chrono::seconds>();
+    healthy.m_last_send = now;
+    healthy.m_last_recv = now;
+    BOOST_CHECK(!healthy.fPauseSend);
+    BOOST_CHECK(!connman.InactivityCheck(healthy));
+    healthy.SetSendPaused(true);
+    BOOST_CHECK(!connman.InactivityCheck(healthy));
+    healthy.SetSendPaused(false);
+    BOOST_CHECK(!connman.InactivityCheck(healthy));
+}
+
+BOOST_AUTO_TEST_CASE(paused_peer_tx_announcements_are_bounded)
+{
+    struct RestoreMockTime {
+        ~RestoreMockTime() { SetMockTime(0s); }
+    } restore_mock_time;
+
+    const auto start = std::chrono::seconds{1'700'000'000};
+    SetMockTime(start);
+
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    connman.SetPeerConnectTimeout(1s);
+    auto& peerman = *m_node.peerman;
+
+    in_addr ipv4Addr;
+    ipv4Addr.s_addr = 0xa0b0c001;
+    const CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+
+    CNode paused{/*id=*/9101,
+                 /*sock=*/nullptr,
+                 addr,
+                 /*nKeyedNetGroupIn=*/0,
+                 /*nLocalHostNonceIn=*/0,
+                 CAddress{},
+                 /*addrNameIn=*/std::string{},
+                 ConnectionType::OUTBOUND_FULL_RELAY,
+                 /*inbound_onion=*/false};
+    CNode healthy{/*id=*/9102,
+                  /*sock=*/nullptr,
+                  addr,
+                  /*nKeyedNetGroupIn=*/1,
+                  /*nLocalHostNonceIn=*/1,
+                  CAddress{},
+                  /*addrNameIn=*/std::string{},
+                  ConnectionType::OUTBOUND_FULL_RELAY,
+                  /*inbound_onion=*/false};
+
+    struct Cleanup {
+        ConnmanTestMsg& connman;
+        PeerManager& peerman;
+        CNode& paused;
+        CNode& healthy;
+        bool finalized{false};
+        ~Cleanup()
+        {
+            connman.RemoveTestNode(paused);
+            connman.RemoveTestNode(healthy);
+            if (!finalized) {
+                peerman.FinalizeNode(paused);
+                peerman.FinalizeNode(healthy);
+            }
+        }
+    } cleanup{connman, peerman, paused, healthy};
+
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        const ServiceFlags services{NODE_NETWORK | NODE_WITNESS};
+        connman.Handshake(paused, /*successfully_connected=*/true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, /*relay_txs=*/true);
+        connman.Handshake(healthy, /*successfully_connected=*/true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, /*relay_txs=*/true);
+    }
+    BOOST_REQUIRE(paused.fSuccessfullyConnected);
+    BOOST_REQUIRE(healthy.fSuccessfullyConnected);
+    // A zero test send buffer pauses on the handshake's own messages.
+    // The case below pauses one peer on purpose.
+    paused.SetSendPaused(false);
+    healthy.SetSendPaused(false);
+    connman.AddTestNode(paused);
+    connman.AddTestNode(healthy);
+
+    const auto send_bytes = [](CNode& node) {
+        LOCK(node.cs_vSend);
+        return node.nSendSize;
+    };
+    const auto announce = [&](uint32_t n) {
+        uint256 hash;
+        std::memcpy(hash.begin(), &n, sizeof(n));
+        peerman.RelayTransaction(hash, hash);
+    };
+
+    for (uint32_t i = 1; i <= 10; ++i) {
+        announce(i);
+    }
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), 10U);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 10U);
+
+    paused.SetSendPaused(true);
+    const size_t paused_bytes = send_bytes(paused);
+    for (uint32_t i = 11; i <= 50; ++i) {
+        announce(i);
+    }
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT));
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 50U);
+    announce(1);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT));
+    announce(36);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT));
+    paused.SetSendPaused(false);
+    announce(36);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT) + 1U);
+    paused.SetSendPaused(true);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 50U);
+
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&paused));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT));
+    BOOST_CHECK(send_bytes(paused) - paused_bytes < 1000);
+    BOOST_CHECK(send_bytes(paused) >= paused_bytes);
+
+    const size_t before_ping = send_bytes(paused);
+    connman.PushMessage(&paused, CNetMsgMaker{PROTOCOL_VERSION}.Make(NetMsgType::PING, uint64_t{9}));
+    BOOST_CHECK(send_bytes(paused) > before_ping);
+    BOOST_CHECK(paused.fPauseSend);
+    BOOST_CHECK(!paused.fDisconnect);
+
+    paused.SetSendPaused(false);
+    BOOST_CHECK(!paused.fPauseSend);
+    for (uint32_t i = 51; i <= 60; ++i) {
+        announce(i);
+    }
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT) + 10U);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 60U);
+
+    paused.SetSendPaused(true);
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&paused));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), static_cast<unsigned>(PAUSED_TX_INVENTORY_LIMIT));
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 60U);
+
+    const auto pause_started = paused.m_pause_send_since.load();
+    paused.SetSendPaused(true);
+    BOOST_CHECK_EQUAL(paused.m_pause_send_since.load().count(), pause_started.count());
+
+    SetMockTime(pause_started + TIMEOUT_INTERVAL);
+    paused.m_last_send = pause_started + TIMEOUT_INTERVAL;
+    paused.m_last_recv = pause_started + TIMEOUT_INTERVAL;
+    BOOST_CHECK(!connman.InactivityCheck(paused));
+
+    SetMockTime(pause_started + TIMEOUT_INTERVAL + 1s);
+    paused.m_last_send = pause_started + TIMEOUT_INTERVAL + 1s;
+    paused.m_last_recv = pause_started + TIMEOUT_INTERVAL + 1s;
+    BOOST_CHECK(connman.InactivityCheck(paused));
+
+    const auto now = GetTime<std::chrono::seconds>();
+    healthy.m_last_send = now;
+    healthy.m_last_recv = now;
+    BOOST_CHECK(!healthy.fPauseSend);
+    BOOST_CHECK(!connman.InactivityCheck(healthy));
+
+    peerman.FinalizeNode(paused);
+    peerman.FinalizeNode(healthy);
+    cleanup.finalized = true;
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(paused.GetId()), 0U);
+    BOOST_CHECK_EQUAL(peerman.GetTxAnnouncementCount(healthy.GetId()), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(paused_send_buffer_keeps_control_traffic)
+{
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    in_addr ipv4Addr;
+    ipv4Addr.s_addr = 0xa0b0c001;
+    const CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+    CNode node{/*id=*/9201,
+               /*sock=*/nullptr,
+               addr,
+               /*nKeyedNetGroupIn=*/0,
+               /*nLocalHostNonceIn=*/0,
+               CAddress{},
+               /*addrNameIn=*/std::string{},
+               ConnectionType::OUTBOUND_FULL_RELAY,
+               /*inbound_onion=*/false};
+    node.fSuccessfullyConnected = true;
+    node.SetSendPaused(true);
+    const size_t pause_limit = connman.TestSendBufferMax();
+    {
+        LOCK(node.cs_vSend);
+        node.nSendSize = pause_limit + 1;
+    }
+    const auto queued = [&]() {
+        LOCK(node.cs_vSend);
+        return node.nSendSize;
+    };
+    const size_t saturated = queued();
+    CNetMsgMaker maker{PROTOCOL_VERSION};
+    BOOST_CHECK(!connman.PushMessage(&node, maker.Make(NetMsgType::INV, std::vector<CInv>{})));
+    BOOST_CHECK_EQUAL(queued(), saturated);
+    BOOST_CHECK(connman.PushMessage(&node, maker.Make(NetMsgType::PING, uint64_t{11})));
+    BOOST_CHECK(queued() > saturated);
+    BOOST_CHECK(node.fPauseSend);
+    BOOST_CHECK(!node.fDisconnect);
+    {
+        LOCK(node.cs_vSend);
+        node.nSendSize = pause_limit + PAUSED_SEND_CONTROL_HEADROOM + 1;
+    }
+    const size_t capped = queued();
+    BOOST_CHECK(!connman.PushMessage(&node, maker.Make(NetMsgType::PING, uint64_t{12})));
+    BOOST_CHECK_EQUAL(queued(), capped);
+    BOOST_CHECK(!connman.PushMessage(&node, maker.Make(NetMsgType::BLOCK, CBlock{})));
+    BOOST_CHECK_EQUAL(queued(), capped);
+}
+
+BOOST_AUTO_TEST_CASE(paused_block_announcements_stay_bounded)
+{
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    auto& peerman = *m_node.peerman;
+    in_addr ipv4Addr;
+    ipv4Addr.s_addr = 0xa0b0c001;
+    const CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+    CNode paused{/*id=*/9301,
+                 /*sock=*/nullptr,
+                 addr,
+                 /*nKeyedNetGroupIn=*/0,
+                 /*nLocalHostNonceIn=*/0,
+                 CAddress{},
+                 /*addrNameIn=*/std::string{},
+                 ConnectionType::OUTBOUND_FULL_RELAY,
+                 /*inbound_onion=*/false};
+    CNode healthy{/*id=*/9302,
+                  /*sock=*/nullptr,
+                  addr,
+                  /*nKeyedNetGroupIn=*/1,
+                  /*nLocalHostNonceIn=*/1,
+                  CAddress{},
+                  /*addrNameIn=*/std::string{},
+                  ConnectionType::OUTBOUND_FULL_RELAY,
+                  /*inbound_onion=*/false};
+    struct Cleanup {
+        ConnmanTestMsg& connman;
+        PeerManager& peerman;
+        CNode& paused;
+        CNode& healthy;
+        bool finalized{false};
+        ~Cleanup()
+        {
+            connman.RemoveTestNode(paused);
+            connman.RemoveTestNode(healthy);
+            if (!finalized) {
+                peerman.FinalizeNode(paused);
+                peerman.FinalizeNode(healthy);
+            }
+        }
+    } cleanup{connman, peerman, paused, healthy};
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        const ServiceFlags services{NODE_NETWORK | NODE_WITNESS};
+        connman.Handshake(paused, true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, true);
+        connman.Handshake(healthy, true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, true);
+    }
+    connman.AddTestNode(paused);
+    connman.AddTestNode(healthy);
+    paused.SetSendPaused(false);
+    healthy.SetSendPaused(false);
+    paused.SetSendPaused(true);
+
+    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_node.chainman->ActiveChain().Tip());
+    BOOST_REQUIRE(tip != nullptr);
+    peerman.TestAnnounceBlockTip(tip);
+    const size_t one = peerman.GetBlockAnnouncementCount(healthy.GetId());
+    BOOST_REQUIRE(one >= 1U);
+    BOOST_REQUIRE(one <= 8U);
+    for (int i = 1; i < 20; ++i) {
+        peerman.TestAnnounceBlockTip(tip);
+    }
+    const size_t paused_before = peerman.GetBlockAnnouncementCount(paused.GetId());
+    const size_t healthy_before = peerman.GetBlockAnnouncementCount(healthy.GetId());
+    BOOST_CHECK_EQUAL(paused_before, std::min<size_t>(one * 20, 8));
+    BOOST_CHECK_EQUAL(healthy_before, one * 20);
+    BOOST_CHECK(healthy_before > paused_before);
+    BOOST_CHECK(peerman.GetNewestBlockAnnouncement(paused.GetId()) == tip->GetBlockHash());
+    const auto paused_bytes = WITH_LOCK(paused.cs_vSend, return paused.nSendSize);
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&paused));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), paused_before);
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(healthy.GetId()), healthy_before);
+    BOOST_CHECK_EQUAL(WITH_LOCK(paused.cs_vSend, return paused.nSendSize), paused_bytes);
+
+    peerman.FinalizeNode(paused);
+    peerman.FinalizeNode(healthy);
+    cleanup.finalized = true;
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), 0U);
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(healthy.GetId()), 0U);
+}
 
 BOOST_AUTO_TEST_CASE(cnode_listen_port)
 {
@@ -846,6 +1238,13 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     const int64_t time{0};
     const CNetMsgMaker msg_maker{PROTOCOL_VERSION};
 
+    // The test connman starts with a zero send buffer, so any queued handshake
+    // byte sets fPauseSend and SendMessages then skips address relay. This
+    // case checks the advertisement, so give it the production pause threshold.
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    const unsigned int prev_send_buffer = connman.TestSendBufferMax();
+    connman.SetTestSendBufferMax(1000 * 1000);
+
     // Force Chainstate::IsInitialBlockDownload() to return false.
     // Otherwise PushAddress() isn't called by PeerManager::ProcessMessage().
     TestChainState& chainstate =
@@ -918,6 +1317,7 @@ BOOST_AUTO_TEST_CASE(initial_advertise_from_version_message)
     BOOST_CHECK(sent);
 
     CaptureMessage = CaptureMessageOrig;
+    connman.SetTestSendBufferMax(prev_send_buffer);
     chainstate.ResetIbd();
     m_node.args->ForceSetArg("-capturemessages", "0");
     m_node.args->ForceSetArg("-bind", "");
@@ -1166,6 +1566,138 @@ BOOST_AUTO_TEST_CASE(automatic_port_mapping_disabled)
     BOOST_CHECK_EQUAL(CChainParams::Main()->GetDefaultPort(), 8760);
     BOOST_CHECK_EQUAL(CreateBaseChainParams(CBaseChainParams::MAIN)->RPCPort(), 8761);
     BOOST_CHECK_EQUAL(CreateBaseChainParams(CBaseChainParams::MAIN)->OnionServiceTargetPort(), 8762);
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_FIXTURE_TEST_SUITE(net_tests_chain100, TestChain100Setup)
+
+BOOST_AUTO_TEST_CASE(paused_getblocks_response_stays_one_batch)
+{
+    auto& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    auto& peerman = *m_node.peerman;
+    connman.SetTestSendBufferMax(1000 * 1000);
+    in_addr ipv4Addr;
+    ipv4Addr.s_addr = 0xa0b0c001;
+    const CAddress addr = CAddress(CService(ipv4Addr, 7777), NODE_NETWORK);
+    CNode paused{/*id=*/9401,
+                 /*sock=*/nullptr,
+                 addr,
+                 /*nKeyedNetGroupIn=*/0,
+                 /*nLocalHostNonceIn=*/0,
+                 CAddress{},
+                 /*addrNameIn=*/std::string{},
+                 ConnectionType::OUTBOUND_FULL_RELAY,
+                 /*inbound_onion=*/false};
+    CNode healthy{/*id=*/9402,
+                  /*sock=*/nullptr,
+                  addr,
+                  /*nKeyedNetGroupIn=*/1,
+                  /*nLocalHostNonceIn=*/1,
+                  CAddress{},
+                  /*addrNameIn=*/std::string{},
+                  ConnectionType::OUTBOUND_FULL_RELAY,
+                  /*inbound_onion=*/false};
+    struct Cleanup {
+        ConnmanTestMsg& connman;
+        PeerManager& peerman;
+        CNode& paused;
+        CNode& healthy;
+        bool finalized{false};
+        ~Cleanup()
+        {
+            connman.RemoveTestNode(paused);
+            connman.RemoveTestNode(healthy);
+            if (!finalized) {
+                peerman.FinalizeNode(paused);
+                peerman.FinalizeNode(healthy);
+            }
+        }
+    } cleanup{connman, peerman, paused, healthy};
+
+    const ServiceFlags services{NODE_NETWORK | NODE_WITNESS};
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        connman.Handshake(paused, true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, true);
+        connman.Handshake(healthy, true, services, services, RIGOR_PROTOCOL_CURRENT_VERSION, true);
+    }
+    BOOST_REQUIRE(paused.fSuccessfullyConnected);
+    BOOST_REQUIRE(healthy.fSuccessfullyConnected);
+    BOOST_REQUIRE(!paused.fDisconnect);
+    BOOST_REQUIRE(!healthy.fDisconnect);
+    connman.AddTestNode(paused);
+    connman.AddTestNode(healthy);
+
+    const CNetMsgMaker msg_maker{PROTOCOL_VERSION};
+    std::atomic<bool> interrupt{false};
+    const auto time_received = std::chrono::microseconds{0};
+    const int height = WITH_LOCK(cs_main, return m_node.chainman->ActiveChain().Height());
+    BOOST_REQUIRE(height > 8);
+    const uint256 genesis = WITH_LOCK(cs_main, return m_node.chainman->ActiveChain()[0]->GetBlockHash());
+    auto request_blocks = [&](CNode& node) {
+        CBlockLocator locator{std::vector<uint256>{genesis}};
+        const auto msg = msg_maker.Make(NetMsgType::GETBLOCKS, locator, uint256{});
+        CDataStream stream{msg.data, SER_NETWORK, PROTOCOL_VERSION};
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        peerman.ProcessMessage(node, NetMsgType::GETBLOCKS, stream, time_received, interrupt);
+    };
+
+    paused.SetSendPaused(true);
+    request_blocks(paused);
+    const size_t one = peerman.GetGetBlocksResponseCount(paused.GetId());
+    BOOST_CHECK_EQUAL(one, static_cast<size_t>(height));
+    BOOST_CHECK(one > 8U);
+    BOOST_CHECK(one <= 500U);
+    for (int i = 0; i < 10; ++i) {
+        request_blocks(paused);
+    }
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(paused.GetId()), one);
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), 0U);
+
+    const CBlockIndex* tip = WITH_LOCK(cs_main, return m_node.chainman->ActiveChain().Tip());
+    for (int i = 0; i < 20; ++i) {
+        peerman.TestAnnounceBlockTip(tip);
+    }
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), 8U);
+    BOOST_CHECK(peerman.GetNewestBlockAnnouncement(paused.GetId()) == tip->GetBlockHash());
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(paused.GetId()), one);
+
+    const auto paused_bytes = WITH_LOCK(paused.cs_vSend, return paused.nSendSize);
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&paused));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(paused.GetId()), one);
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), 8U);
+    BOOST_CHECK(WITH_LOCK(paused.cs_vSend, return paused.nSendSize) - paused_bytes < 1000);
+
+    healthy.SetSendPaused(false);
+    request_blocks(healthy);
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(healthy.GetId()), one);
+    request_blocks(healthy);
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(healthy.GetId()), one * 2);
+    const auto healthy_bytes = WITH_LOCK(healthy.cs_vSend, return healthy.nSendSize);
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&healthy));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(healthy.GetId()), 0U);
+    BOOST_CHECK(WITH_LOCK(healthy.cs_vSend, return healthy.nSendSize) > healthy_bytes + 1000);
+
+    paused.SetSendPaused(false);
+    const auto resume_bytes = WITH_LOCK(paused.cs_vSend, return paused.nSendSize);
+    {
+        LOCK(NetEventsInterface::g_msgproc_mutex);
+        BOOST_CHECK(peerman.SendMessages(&paused));
+    }
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(paused.GetId()), 0U);
+    BOOST_CHECK(WITH_LOCK(paused.cs_vSend, return paused.nSendSize) > resume_bytes + 1000);
+
+    peerman.FinalizeNode(paused);
+    peerman.FinalizeNode(healthy);
+    cleanup.finalized = true;
+    BOOST_CHECK_EQUAL(peerman.GetGetBlocksResponseCount(paused.GetId()), 0U);
+    BOOST_CHECK_EQUAL(peerman.GetBlockAnnouncementCount(paused.GetId()), 0U);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

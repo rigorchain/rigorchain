@@ -954,6 +954,11 @@ void RPCConsole::message(int category, const QString &message, bool html)
 
 void RPCConsole::updateNetworkState()
 {
+    // setNetworkActive() is connected for the life of the model and is not
+    // disconnected when setClientModel(nullptr) runs. A queued
+    // networkActiveChanged signal can arrive after clientModel is cleared.
+    if (!clientModel) return;
+
     QString connections = QString::number(clientModel->getNumConnections()) + " (";
     connections += tr("In:") + " " + QString::number(clientModel->getNumConnections(CONNECTIONS_IN)) + " / ";
     connections += tr("Out:") + " " + QString::number(clientModel->getNumConnections(CONNECTIONS_OUT)) + ")";

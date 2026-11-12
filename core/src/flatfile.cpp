@@ -3,6 +3,9 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <cerrno>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 #include <flatfile.h>
@@ -22,7 +25,7 @@ FlatFileSeq::FlatFileSeq(fs::path dir, const char* prefix, size_t chunk_size) :
 
 std::string FlatFilePos::ToString() const
 {
-    return strprintf("FlatFilePos(nFile=%i, nPos=%i)", nFile, nPos);
+    return strprintf("FlatFilePos(nFile=%i, nPos=%llu)", nFile, static_cast<unsigned long long>(nPos));
 }
 
 fs::path FlatFileSeq::FileName(const FlatFilePos& pos) const
@@ -44,10 +47,13 @@ FILE* FlatFileSeq::Open(const FlatFilePos& pos, bool read_only)
         LogPrintf("Unable to open file %s\n", fs::PathToString(path));
         return nullptr;
     }
-    if (pos.nPos && fseek(file, pos.nPos, SEEK_SET)) {
-        LogPrintf("Unable to seek to position %u of %s\n", pos.nPos, fs::PathToString(path));
-        fclose(file);
-        return nullptr;
+    if (pos.nPos) {
+        if (pos.nPos > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+            FileSeek64(file, static_cast<int64_t>(pos.nPos), SEEK_SET) != 0) {
+            LogPrintf("Unable to seek to position %llu of %s\n", static_cast<unsigned long long>(pos.nPos), fs::PathToString(path));
+            fclose(file);
+            return nullptr;
+        }
     }
     return file;
 }
@@ -56,17 +62,42 @@ size_t FlatFileSeq::Allocate(const FlatFilePos& pos, size_t add_size, bool& out_
 {
     out_of_space = false;
 
-    unsigned int n_old_chunks = (pos.nPos + m_chunk_size - 1) / m_chunk_size;
-    unsigned int n_new_chunks = (pos.nPos + add_size + m_chunk_size - 1) / m_chunk_size;
+    if (add_size > std::numeric_limits<uint64_t>::max() - pos.nPos) {
+        LogPrintf("FlatFileSeq::Allocate position overflow file=%i pos=%llu add=%llu\n",
+                  pos.nFile, static_cast<unsigned long long>(pos.nPos), static_cast<unsigned long long>(add_size));
+        return 0;
+    }
+    const uint64_t chunk = m_chunk_size;
+    auto chunks_covering = [chunk](uint64_t value) -> uint64_t {
+        if (value == 0) return 0;
+        if (value > std::numeric_limits<uint64_t>::max() - (chunk - 1)) {
+            return std::numeric_limits<uint64_t>::max();
+        }
+        return (value + chunk - 1) / chunk;
+    };
+    const uint64_t end = pos.nPos + static_cast<uint64_t>(add_size);
+    const uint64_t n_old_chunks = chunks_covering(pos.nPos);
+    const uint64_t n_new_chunks = chunks_covering(end);
+    if (n_new_chunks == std::numeric_limits<uint64_t>::max() ||
+        n_new_chunks > std::numeric_limits<uint64_t>::max() / chunk) {
+        LogPrintf("FlatFileSeq::Allocate chunk overflow file=%i pos=%llu\n",
+                  pos.nFile, static_cast<unsigned long long>(pos.nPos));
+        return 0;
+    }
     if (n_new_chunks > n_old_chunks) {
-        size_t old_size = pos.nPos;
-        size_t new_size = n_new_chunks * m_chunk_size;
-        size_t inc_size = new_size - old_size;
+        const uint64_t old_size = pos.nPos;
+        const uint64_t new_size = n_new_chunks * chunk;
+        if (new_size < old_size || new_size - old_size > std::numeric_limits<size_t>::max()) {
+            LogPrintf("FlatFileSeq::Allocate size overflow file=%i pos=%llu\n",
+                      pos.nFile, static_cast<unsigned long long>(pos.nPos));
+            return 0;
+        }
+        const size_t inc_size = static_cast<size_t>(new_size - old_size);
 
         if (CheckDiskSpace(m_dir, inc_size)) {
             FILE *file = Open(pos);
             if (file) {
-                LogPrint(BCLog::VALIDATION, "Pre-allocating up to position 0x%x in %s%05u.dat\n", new_size, m_prefix, pos.nFile);
+                LogPrint(BCLog::VALIDATION, "Pre-allocating up to position 0x%llx in %s%05u.dat\n", static_cast<unsigned long long>(new_size), m_prefix, pos.nFile);
                 AllocateFileRange(file, pos.nPos, inc_size);
                 fclose(file);
                 return inc_size;

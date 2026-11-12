@@ -12,9 +12,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <utility>
 
 const char * const DEFAULT_DEBUGLOGFILE = "debug.log";
 constexpr auto MAX_USER_SETABLE_SEVERITY_LEVEL{BCLog::Level::Info};
@@ -23,13 +26,20 @@ namespace {
 struct AttackerLogWindow {
     std::chrono::steady_clock::time_point start{std::chrono::steady_clock::now()};
     size_t bytes{0};
+    uint64_t suppressed{0};
     bool noted{false};
 };
 
 struct AttackerLogLimit {
     std::mutex mu;
     size_t quota{1024 * 1024};
+    size_t global_quota{ATTACKER_LOG_GLOBAL_MULTIPLIER * 1024 * 1024};
+    //! Legacy single window for keys other than the two peer-isolated categories.
     std::map<std::string, AttackerLogWindow> windows;
+    //! Per-peer, per-category windows. The integer is a NodeId, never an address string.
+    std::map<std::pair<std::string, int64_t>, AttackerLogWindow> peer_windows;
+    std::map<std::string, AttackerLogWindow> global_windows;
+    std::set<int64_t> peer_slots;
 };
 
 AttackerLogLimit& AttackerLogs()
@@ -37,29 +47,130 @@ AttackerLogLimit& AttackerLogs()
     static AttackerLogLimit state;
     return state;
 }
+
+thread_local int64_t g_attacker_log_peer{ATTACKER_LOG_LOCAL_PEER};
+
+bool IsolatedAttackerKey(const std::string& key)
+{
+    return key == "bad-diffbits" || key == "checkpoint-fork";
+}
+
+void NoteSuppressed(AttackerLogWindow& window, const std::string& label)
+{
+    if (window.suppressed < std::numeric_limits<uint64_t>::max()) {
+        ++window.suppressed;
+    }
+    if (!window.noted) {
+        window.noted = true;
+        LogInstance().LogPrintStr(
+            "Warning: rate-limited attacker-controlled log (" + label + "); further copies suppressed for up to one hour\n",
+            __func__, __FILE__, __LINE__, BCLog::LogFlags::NONE, BCLog::Level::None);
+    }
+}
+
+void RollWindow(AttackerLogWindow& window, const std::string& label, std::chrono::steady_clock::time_point now)
+{
+    if (now - window.start < std::chrono::hours{1}) return;
+    if (window.suppressed > 0) {
+        LogInstance().LogPrintStr(
+            "attacker-controlled log (" + label + ") suppressed " + std::to_string(window.suppressed) + " messages in the previous window\n",
+            __func__, __FILE__, __LINE__, BCLog::LogFlags::NONE, BCLog::Level::None);
+    }
+    window = AttackerLogWindow{};
+    window.start = now;
+}
+
+bool WouldAccept(const AttackerLogWindow& window, size_t message_bytes, size_t quota)
+{
+    if (window.bytes == 0) return true;
+    if (message_bytes > quota) return false;
+    return window.bytes <= quota - message_bytes;
+}
+
+int64_t PeerSlot(AttackerLogLimit& state)
+{
+    const int64_t current = g_attacker_log_peer;
+    if (current < 0) return ATTACKER_LOG_LOCAL_PEER;
+    if (state.peer_slots.count(current) != 0) return current;
+    if (state.peer_slots.size() >= MAX_ATTACKER_LOG_PEERS) return ATTACKER_LOG_OVERFLOW_PEER;
+    state.peer_slots.insert(current);
+    return current;
+}
 } // namespace
+
+AttackerLogPeerScope::AttackerLogPeerScope(int64_t node_id)
+    : m_previous(g_attacker_log_peer)
+{
+    g_attacker_log_peer = node_id;
+}
+
+AttackerLogPeerScope::~AttackerLogPeerScope()
+{
+    g_attacker_log_peer = m_previous;
+}
 
 bool SuppressRepeatedAttackerLog(const std::string& key, size_t message_bytes)
 {
     auto& state = AttackerLogs();
     std::lock_guard<std::mutex> lock(state.mu);
     const auto now = std::chrono::steady_clock::now();
-    AttackerLogWindow& window = state.windows[key];
-    if (now - window.start >= std::chrono::hours{1}) {
-        window = AttackerLogWindow{};
-        window.start = now;
+    if (!IsolatedAttackerKey(key)) {
+        AttackerLogWindow& window = state.windows[key];
+        if (now - window.start >= std::chrono::hours{1}) {
+            window = AttackerLogWindow{};
+            window.start = now;
+        }
+        if (WouldAccept(window, message_bytes, state.quota)) {
+            window.bytes += message_bytes;
+            return false;
+        }
+        if (!window.noted) {
+            window.noted = true;
+            LogInstance().LogPrintStr(
+                "Warning: rate-limited attacker-controlled log (" + key + "); further copies suppressed for up to one hour\n",
+                __func__, __FILE__, __LINE__, BCLog::LogFlags::NONE, BCLog::Level::None);
+        }
+        return true;
     }
-    if (window.bytes == 0 || window.bytes + message_bytes <= state.quota) {
-        window.bytes += message_bytes;
+
+    const int64_t peer_id = PeerSlot(state);
+    const std::string peer_label = key + " peer=" + std::to_string(peer_id);
+    const std::string global_label = key + " global";
+    AttackerLogWindow& peer_window = state.peer_windows[{key, peer_id}];
+    AttackerLogWindow& global_window = state.global_windows[key];
+    RollWindow(peer_window, peer_label, now);
+    RollWindow(global_window, global_label, now);
+    const bool peer_ok = WouldAccept(peer_window, message_bytes, state.quota);
+    const bool global_ok = WouldAccept(global_window, message_bytes, state.global_quota);
+    if (peer_ok && global_ok) {
+        peer_window.bytes += message_bytes;
+        global_window.bytes += message_bytes;
         return false;
     }
-    if (!window.noted) {
-        window.noted = true;
-        LogInstance().LogPrintStr(
-            "Warning: rate-limited attacker-controlled log (" + key + "); further copies suppressed for up to one hour\n",
-            __func__, __FILE__, __LINE__, BCLog::LogFlags::NONE, BCLog::Level::None);
-    }
+    if (!peer_ok) NoteSuppressed(peer_window, peer_label);
+    if (!global_ok) NoteSuppressed(global_window, global_label);
     return true;
+}
+
+void ReleaseAttackerLogPeer(int64_t node_id)
+{
+    if (node_id < 0) return;
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    state.peer_slots.erase(node_id);
+    for (auto it = state.peer_windows.begin(); it != state.peer_windows.end();) {
+        if (it->first.second == node_id) {
+            if (it->second.suppressed > 0) {
+                const std::string label = it->first.first + " peer=" + std::to_string(node_id);
+                LogInstance().LogPrintStr(
+                    "attacker-controlled log (" + label + ") suppressed " + std::to_string(it->second.suppressed) + " messages in the previous window\n",
+                    __func__, __FILE__, __LINE__, BCLog::LogFlags::NONE, BCLog::Level::None);
+            }
+            it = state.peer_windows.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void SetAttackerLogQuotaForTest(size_t bytes)
@@ -69,12 +180,63 @@ void SetAttackerLogQuotaForTest(size_t bytes)
     state.quota = bytes;
 }
 
+void SetAttackerLogGlobalQuotaForTest(size_t bytes)
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    state.global_quota = bytes;
+}
+
 void ResetAttackerLogRateLimitForTest()
 {
     auto& state = AttackerLogs();
     std::lock_guard<std::mutex> lock(state.mu);
     state.windows.clear();
+    state.peer_windows.clear();
+    state.global_windows.clear();
+    state.peer_slots.clear();
     state.quota = 1024 * 1024;
+    state.global_quota = ATTACKER_LOG_GLOBAL_MULTIPLIER * 1024 * 1024;
+}
+
+size_t AttackerLogPeerSlotCountForTest()
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    return state.peer_slots.size();
+}
+
+size_t AttackerLogPeerQuotaForTest()
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    return state.quota;
+}
+
+size_t AttackerLogGlobalQuotaForTest()
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    return state.global_quota;
+}
+
+uint64_t AttackerLogSuppressedCountForTest(const std::string& key, int64_t node_id)
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    const auto it = state.peer_windows.find({key, node_id});
+    if (it == state.peer_windows.end()) return 0;
+    return it->second.suppressed;
+}
+
+void ExpireAttackerLogWindowsForTest()
+{
+    auto& state = AttackerLogs();
+    std::lock_guard<std::mutex> lock(state.mu);
+    const auto expired = std::chrono::steady_clock::now() - std::chrono::hours{2};
+    for (auto& entry : state.windows) entry.second.start = expired;
+    for (auto& entry : state.peer_windows) entry.second.start = expired;
+    for (auto& entry : state.global_windows) entry.second.start = expired;
 }
 
 BCLog::Logger& LogInstance()

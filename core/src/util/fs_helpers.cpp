@@ -159,12 +159,60 @@ void DirectoryCommit(const fs::path& dirname)
 #endif
 }
 
-bool TruncateFile(FILE* file, unsigned int length)
+int FileSeek64(FILE* file, int64_t offset, int origin)
 {
+    if (!file) {
+        errno = EINVAL;
+        return -1;
+    }
 #if defined(WIN32)
-    return _chsize(_fileno(file), length) == 0;
+    return _fseeki64(file, offset, origin);
 #else
-    return ftruncate(fileno(file), length) == 0;
+    if (sizeof(off_t) < sizeof(int64_t)) {
+        if (offset > static_cast<int64_t>(std::numeric_limits<off_t>::max()) ||
+            offset < static_cast<int64_t>(std::numeric_limits<off_t>::min())) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+    }
+    return fseeko(file, static_cast<off_t>(offset), origin);
+#endif
+}
+
+int64_t FileTell64(FILE* file)
+{
+    if (!file) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(WIN32)
+    return _ftelli64(file);
+#else
+    const off_t pos = ftello(file);
+    if (pos < 0) {
+        return -1;
+    }
+    if (sizeof(off_t) > sizeof(int64_t) && pos > static_cast<off_t>(std::numeric_limits<int64_t>::max())) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    return static_cast<int64_t>(pos);
+#endif
+}
+
+bool TruncateFile(FILE* file, uint64_t length)
+{
+    if (!file || length > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        return false;
+    }
+#if defined(WIN32)
+    return _chsize_s(_fileno(file), static_cast<__int64>(length)) == 0;
+#else
+    if (sizeof(off_t) < sizeof(int64_t) &&
+        length > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+        return false;
+    }
+    return ftruncate(fileno(file), static_cast<off_t>(length)) == 0;
 #endif
 }
 
@@ -196,16 +244,23 @@ int RaiseFileDescriptorLimit(int nMinFD)
  * this function tries to make a particular range of a file allocated (corresponding to disk space)
  * it is advisory, and the range specified in the arguments will never contain live data
  */
-void AllocateFileRange(FILE* file, unsigned int offset, unsigned int length)
+void AllocateFileRange(FILE* file, uint64_t offset, uint64_t length)
 {
+    if (!file ||
+        offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        length > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+        offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - length) {
+        return;
+    }
+    const int64_t nEndPos = static_cast<int64_t>(offset + length);
 #if defined(WIN32)
     // Windows-specific version
     HANDLE hFile = (HANDLE)_get_osfhandle(_fileno(file));
     LARGE_INTEGER nFileSize;
-    int64_t nEndPos = (int64_t)offset + length;
-    nFileSize.u.LowPart = nEndPos & 0xFFFFFFFF;
-    nFileSize.u.HighPart = nEndPos >> 32;
-    SetFilePointerEx(hFile, nFileSize, 0, FILE_BEGIN);
+    nFileSize.QuadPart = nEndPos;
+    if (!SetFilePointerEx(hFile, nFileSize, nullptr, FILE_BEGIN)) {
+        return;
+    }
     SetEndOfFile(hFile);
 #elif defined(MAC_OSX)
     // OSX specific version
@@ -215,23 +270,22 @@ void AllocateFileRange(FILE* file, unsigned int offset, unsigned int length)
     fst.fst_flags = F_ALLOCATECONTIG;
     fst.fst_posmode = F_PEOFPOSMODE;
     fst.fst_offset = 0;
-    fst.fst_length = length; // mac os fst_length takes the # of free bytes to allocate, not desired file size
+    fst.fst_length = static_cast<off_t>(length); // mac os fst_length takes the # of free bytes to allocate, not desired file size
     fst.fst_bytesalloc = 0;
     if (fcntl(fileno(file), F_PREALLOCATE, &fst) == -1) {
         fst.fst_flags = F_ALLOCATEALL;
         fcntl(fileno(file), F_PREALLOCATE, &fst);
     }
-    ftruncate(fileno(file), static_cast<off_t>(offset) + length);
+    ftruncate(fileno(file), static_cast<off_t>(nEndPos));
 #else
 #if defined(HAVE_POSIX_FALLOCATE)
     // Version using posix_fallocate
-    off_t nEndPos = (off_t)offset + length;
-    if (0 == posix_fallocate(fileno(file), 0, nEndPos)) return;
+    if (0 == posix_fallocate(fileno(file), 0, static_cast<off_t>(nEndPos))) return;
 #endif
     // Fallback version
     // TODO: just write one byte per block
     static const char buf[65536] = {};
-    if (fseek(file, offset, SEEK_SET)) {
+    if (FileSeek64(file, static_cast<int64_t>(offset), SEEK_SET) != 0) {
         return;
     }
     while (length > 0) {

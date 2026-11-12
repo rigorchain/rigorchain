@@ -11,6 +11,7 @@
 #include <net.h>
 #include <util/sock.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstring>
@@ -25,10 +26,26 @@ struct ConnmanTestMsg : public CConnman {
         m_peer_connect_timeout = timeout;
     }
 
+    unsigned int TestSendBufferMax() const
+    {
+        return nSendBufferMaxSize;
+    }
+
+    void SetTestSendBufferMax(unsigned int max_bytes)
+    {
+        nSendBufferMaxSize = max_bytes;
+    }
+
     void AddTestNode(CNode& node)
     {
         LOCK(m_nodes_mutex);
         m_nodes.push_back(&node);
+    }
+
+    void RemoveTestNode(CNode& node)
+    {
+        LOCK(m_nodes_mutex);
+        m_nodes.erase(std::remove(m_nodes.begin(), m_nodes.end(), &node), m_nodes.end());
     }
     void ClearTestNodes()
     {

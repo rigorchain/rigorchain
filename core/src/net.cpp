@@ -25,6 +25,8 @@
 #include <node/eviction.h>
 #include <node/interface_ui.h>
 #include <protocol.h>
+
+#include <limits>
 #include <random.h>
 #include <scheduler.h>
 #include <seed_manifest.h>
@@ -836,6 +838,17 @@ void V1TransportSerializer::prepareForTransport(CSerializedNetMsg& msg, std::vec
     CVectorWriter{SER_NETWORK, INIT_PROTO_VERSION, header, 0, hdr};
 }
 
+void CNode::SetSendPaused(bool pause_send)
+{
+    // Record only the rising edge. Partial sends refresh m_last_send while the
+    // buffer stays above the threshold, so a refreshed timestamp would hide a
+    // peer that never drains (CVE-2026-117349).
+    if (pause_send && !fPauseSend) {
+        m_pause_send_since = GetTime<std::chrono::seconds>();
+    }
+    fPauseSend = pause_send;
+}
+
 size_t CConnman::SocketSendData(CNode& node) const
 {
     auto it = node.vSendMsg.begin();
@@ -866,7 +879,7 @@ size_t CConnman::SocketSendData(CNode& node) const
             if (node.nSendOffset == data.size()) {
                 node.nSendOffset = 0;
                 node.nSendSize -= data.size();
-                node.fPauseSend = node.nSendSize > nSendBufferMaxSize;
+                node.SetSendPaused(node.nSendSize > nSendBufferMaxSize);
                 it++;
             } else {
                 // could not send full message; stop sending more
@@ -1207,6 +1220,15 @@ bool CConnman::InactivityCheck(const CNode& node) const
 
     if (now > last_recv + TIMEOUT_INTERVAL) {
         LogPrint(BCLog::NET, "socket receive timeout: %is peer=%d\n", count_seconds(now - last_recv), node.GetId());
+        return true;
+    }
+
+    // A peer that reads just enough to refresh m_last_send can stay above the
+    // send-buffer threshold indefinitely. Disconnect once the pause itself
+    // lasts TIMEOUT_INTERVAL (Bitcoin Core PR #36667). This does not depend on
+    // whether the peer supports BIP31 nonce pings.
+    if (node.fPauseSend && now > node.m_pause_send_since.load() + TIMEOUT_INTERVAL) {
+        LogPrint(BCLog::NET, "send buffer full for %is peer=%d\n", count_seconds(now - node.m_pause_send_since.load()), node.GetId());
         return true;
     }
 
@@ -2990,23 +3012,28 @@ bool CConnman::NodeFullyConnected(const CNode* pnode)
     return pnode && pnode->fSuccessfullyConnected && !pnode->fDisconnect;
 }
 
-void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
+namespace {
+bool IsPausedSendControl(const std::string& msg_type)
+{
+    // Small protocol/control frames. Block and transaction bodies, inventory,
+    // address gossip, and filter replies are not in this set: those are either
+    // replaceable announcements or answers the peer can request again.
+    return msg_type == NetMsgType::VERSION
+        || msg_type == NetMsgType::VERACK
+        || msg_type == NetMsgType::RIGORCAP
+        || msg_type == NetMsgType::PING
+        || msg_type == NetMsgType::PONG
+        || msg_type == NetMsgType::SENDHEADERS
+        || msg_type == NetMsgType::FEEFILTER
+        || msg_type == NetMsgType::GETHEADERS
+        || msg_type == NetMsgType::GETADDR;
+}
+} // namespace
+
+bool CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
 {
     AssertLockNotHeld(m_total_bytes_sent_mutex);
     size_t nMessageSize = msg.data.size();
-    LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, pnode->GetId());
-    if (gArgs.GetBoolArg("-capturemessages", false)) {
-        CaptureMessage(pnode->addr, msg.m_type, msg.data, /*is_incoming=*/false);
-    }
-
-    TRACE6(net, outbound_message,
-        pnode->GetId(),
-        pnode->m_addr_name.c_str(),
-        pnode->ConnectionTypeAsString().c_str(),
-        msg.m_type.c_str(),
-        msg.data.size(),
-        msg.data.data()
-    );
 
     // make sure we use the appropriate network transport format
     std::vector<unsigned char> serializedHeader;
@@ -3016,13 +3043,35 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
     size_t nBytesSent = 0;
     {
         LOCK(pnode->cs_vSend);
+        if (pnode->fPauseSend) {
+            const size_t base{nSendBufferMaxSize};
+            const size_t headroom{IsPausedSendControl(msg.m_type) ? PAUSED_SEND_CONTROL_HEADROOM : 0};
+            const size_t ceiling{base > std::numeric_limits<size_t>::max() - headroom
+                                     ? std::numeric_limits<size_t>::max()
+                                     : base + headroom};
+            // Already over the ceiling. Do not append. Callers that record
+            // protocol state must check the return value before doing so.
+            if (pnode->nSendSize > ceiling) return false;
+        }
+        LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n", msg.m_type, nMessageSize, pnode->GetId());
+        if (gArgs.GetBoolArg("-capturemessages", false)) {
+            CaptureMessage(pnode->addr, msg.m_type, msg.data, /*is_incoming=*/false);
+        }
+        TRACE6(net, outbound_message,
+            pnode->GetId(),
+            pnode->m_addr_name.c_str(),
+            pnode->ConnectionTypeAsString().c_str(),
+            msg.m_type.c_str(),
+            msg.data.size(),
+            msg.data.data()
+        );
         bool optimisticSend(pnode->vSendMsg.empty());
 
         //log total amount of bytes per message type
         pnode->AccountForSentBytes(msg.m_type, nTotalSize);
         pnode->nSendSize += nTotalSize;
 
-        if (pnode->nSendSize > nSendBufferMaxSize) pnode->fPauseSend = true;
+        if (pnode->nSendSize > nSendBufferMaxSize) pnode->SetSendPaused(true);
         pnode->vSendMsg.push_back(std::move(serializedHeader));
         if (nMessageSize) pnode->vSendMsg.push_back(std::move(msg.data));
 
@@ -3030,6 +3079,7 @@ void CConnman::PushMessage(CNode* pnode, CSerializedNetMsg&& msg)
         if (optimisticSend) nBytesSent = SocketSendData(*pnode);
     }
     if (nBytesSent) RecordBytesSent(nBytesSent);
+    return true;
 }
 
 bool CConnman::ForNode(NodeId id, std::function<bool(CNode* pnode)> func)

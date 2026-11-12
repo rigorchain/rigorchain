@@ -11,6 +11,7 @@
 #include <consensus/validation.h>
 #include <flatfile.h>
 #include <hash.h>
+#include <limits>
 #include <logging.h>
 #include <kernel/chainparams.h>
 #include <pow.h>
@@ -18,6 +19,7 @@
 #include <shutdown.h>
 #include <streams.h>
 #include <undo.h>
+#include <util/fs_helpers.h>
 #include <util/fs.h>
 #include <util/syscall_sandbox.h>
 #include <util/system.h>
@@ -523,11 +525,11 @@ static bool UndoWriteToDisk(const CBlockUndo& blockundo, FlatFilePos& pos, const
     fileout << messageStart << nSize;
 
     // Write undo data
-    long fileOutPos = ftell(fileout.Get());
+    const int64_t fileOutPos = FileTell64(fileout.Get());
     if (fileOutPos < 0) {
         return error("%s: ftell failed", __func__);
     }
-    pos.nPos = (unsigned int)fileOutPos;
+    pos.nPos = static_cast<uint64_t>(fileOutPos);
     fileout << blockundo;
 
     // calculate & write checksum
@@ -663,6 +665,9 @@ bool BlockManager::FindBlockPos(FlatFilePos& pos, unsigned int nAddSize, unsigne
 
     bool finalize_undo = false;
     if (!fKnown) {
+        if (m_blockfile_info[nFile].nSize > std::numeric_limits<uint64_t>::max() - nAddSize) {
+            return AbortNode("Block file position overflow", _("Disk space is too low!"));
+        }
         while (m_blockfile_info[nFile].nSize + nAddSize >= (gArgs.GetBoolArg("-fastprune", false) ? 0x10000 /* 64kb */ : MAX_BLOCKFILE_SIZE)) {
             // when the undo file is keeping up with the block file, we want to flush it explicitly
             // when it is lagging behind (more blocks arrive than are being connected), we let the
@@ -713,6 +718,9 @@ bool BlockManager::FindUndoPos(BlockValidationState& state, int nFile, FlatFileP
 
     LOCK(cs_LastBlockFile);
 
+    if (m_blockfile_info[nFile].nUndoSize > std::numeric_limits<uint64_t>::max() - nAddSize) {
+        return AbortNode(state, "Undo file position overflow", _("Disk space is too low!"));
+    }
     pos.nPos = m_blockfile_info[nFile].nUndoSize;
     m_blockfile_info[nFile].nUndoSize += nAddSize;
     m_dirty_fileinfo.insert(nFile);
@@ -742,11 +750,11 @@ static bool WriteBlockToDisk(const CBlock& block, FlatFilePos& pos, const CMessa
     fileout << messageStart << nSize;
 
     // Write block
-    long fileOutPos = ftell(fileout.Get());
+    const int64_t fileOutPos = FileTell64(fileout.Get());
     if (fileOutPos < 0) {
         return error("WriteBlockToDisk: ftell failed");
     }
-    pos.nPos = (unsigned int)fileOutPos;
+    pos.nPos = static_cast<uint64_t>(fileOutPos);
     fileout << block;
 
     return true;
@@ -821,6 +829,9 @@ bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus
 
 bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const FlatFilePos& pos, const CMessageHeader::MessageStartChars& message_start)
 {
+    if (pos.nPos < 8) {
+        return error("%s: block position %llu has no meta header", __func__, static_cast<unsigned long long>(pos.nPos));
+    }
     FlatFilePos hpos = pos;
     hpos.nPos -= 8; // Seek back 8 bytes for meta header
     AutoFile filein{OpenBlockFile(hpos, true)};

@@ -27,6 +27,7 @@ private Q_SLOTS:
     void destroyingOneModelLeavesTheOther();
     void repeatedCreateDestroyLeavesNoWatcher();
     void unwatchIsIdempotentAndDoesNotCancelAnother();
+    void nullClientModelSkipsNetworkUpdate();
 
 private:
     interfaces::Node& m_node;

@@ -92,6 +92,15 @@ static constexpr bool DEFAULT_DNSSEED{true};
 static constexpr bool DEFAULT_FIXEDSEEDS{true};
 static const size_t DEFAULT_MAXRECEIVEBUFFER = 5 * 1000;
 static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
+/** Control bytes allowed above -maxsendbuffer while send is already paused.
+ *  The pause threshold itself is nSendBufferMaxSize (default 1_000_000).
+ *  A 20-minute pause needs about ten PING/PONG frames plus a locator-sized
+ *  GETHEADERS (MAX_LOCATOR_SZ is 101). 64 KiB is sixteen of those locators
+ *  and is smaller than one maximum protocol message. Non-control messages
+ *  are not queued once nSendSize is already above nSendBufferMaxSize.
+ *  Crossing the ceiling does not disconnect; the pause timeout does.
+ */
+static constexpr size_t PAUSED_SEND_CONTROL_HEADROOM = 64 * 1024;
 
 typedef int64_t NodeId;
 
@@ -428,6 +437,10 @@ public:
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv{false};
     std::atomic_bool fPauseSend{false};
+    /** Time at which fPauseSend last changed from false to true. */
+    std::atomic<std::chrono::seconds> m_pause_send_since{0s};
+    /** Set fPauseSend. A false-to-true edge records the current time and is not refreshed while the pause continues. */
+    void SetSendPaused(bool pause_send);
 
     const ConnectionType m_conn_type;
 
@@ -785,7 +798,10 @@ public:
 
     bool ForNode(NodeId id, std::function<bool(CNode* pnode)> func);
 
-    void PushMessage(CNode* pnode, CSerializedNetMsg&& msg) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex);
+    /** Queue one outbound message. Returns false when a send-paused peer is
+     *  already above the byte ceiling and the message was not queued.
+     */
+    bool PushMessage(CNode* pnode, CSerializedNetMsg&& msg) EXCLUSIVE_LOCKS_REQUIRED(!m_total_bytes_sent_mutex);
 
     using NodeFn = std::function<void(CNode*)>;
     void ForEachNode(const NodeFn& func)
@@ -899,6 +915,8 @@ public:
 
     /** Return true if we should disconnect the peer for failing an inactivity check. */
     bool ShouldRunInactivityChecks(const CNode& node, std::chrono::seconds now) const;
+    /** Return true if the peer is inactive and should be disconnected. */
+    bool InactivityCheck(const CNode& node) const;
 
 private:
     struct ListenSocket {
@@ -945,8 +963,6 @@ private:
 
     void DisconnectNodes();
     void NotifyNumConnectionsChanged();
-    /** Return true if the peer is inactive and should be disconnected. */
-    bool InactivityCheck(const CNode& node) const;
 
     /**
      * Generate a collection of sockets to check for IO readiness.

@@ -208,13 +208,52 @@ namespace BCLog {
 
 BCLog::Logger& LogInstance();
 
-/** Drop repeated attacker-controlled unconditional logs after 1 MiB in an hour.
- *  The first line from a source is always written. Every other log is unchanged.
- *  Returns true when this line must not be written.
+/** Local bucket for logs that are not attributed to a connected peer. */
+static constexpr int64_t ATTACKER_LOG_LOCAL_PEER{-1};
+/** Shared bucket used when the distinct-peer table is already full. */
+static constexpr int64_t ATTACKER_LOG_OVERFLOW_PEER{-2};
+/** Distinct connected peers remembered for attacker-log quotas.
+ *  DEFAULT_MAX_PEER_CONNECTIONS + MAX_ADDNODE_CONNECTIONS.
+ */
+static constexpr size_t MAX_ATTACKER_LOG_PEERS{133};
+/** Global cap, per isolated category, as a multiple of the per-peer quota.
+ *  One peer at its own quota must not fill this cap.
+ */
+static constexpr size_t ATTACKER_LOG_GLOBAL_MULTIPLIER{8};
+
+/** Attributes attacker-controlled logs on this thread to one peer.
+ *  Nested scopes restore the previous peer. NodeId is an int64_t; this header
+ *  does not include the network headers.
+ */
+class AttackerLogPeerScope
+{
+public:
+    explicit AttackerLogPeerScope(int64_t node_id);
+    ~AttackerLogPeerScope();
+    AttackerLogPeerScope(const AttackerLogPeerScope&) = delete;
+    AttackerLogPeerScope& operator=(const AttackerLogPeerScope&) = delete;
+
+private:
+    int64_t m_previous;
+};
+
+/** Drop repeated attacker-controlled unconditional logs after the quota in an hour.
+ *  bad-diffbits and checkpoint-fork use a per-peer window plus a per-category
+ *  global window. Other attacker keys keep one process-wide window.
+ *  The first line of a window is always written. Returns true when this line
+ *  must not be written.
  */
 bool SuppressRepeatedAttackerLog(const std::string& key, size_t message_bytes);
+/** Drops per-peer windows for one numeric peer id. Local and overflow buckets stay. */
+void ReleaseAttackerLogPeer(int64_t node_id);
 void SetAttackerLogQuotaForTest(size_t bytes);
+void SetAttackerLogGlobalQuotaForTest(size_t bytes);
 void ResetAttackerLogRateLimitForTest();
+size_t AttackerLogPeerSlotCountForTest();
+size_t AttackerLogPeerQuotaForTest();
+size_t AttackerLogGlobalQuotaForTest();
+uint64_t AttackerLogSuppressedCountForTest(const std::string& key, int64_t node_id);
+void ExpireAttackerLogWindowsForTest();
 
 /** Return true if log accepts specified category, at the specified level. */
 static inline bool LogAcceptCategory(BCLog::LogFlags category, BCLog::Level level)
@@ -245,6 +284,10 @@ static inline void LogPrintf_(const std::string& logging_function, const std::st
             attacker_key = "invalid-chain";
         } else if (fmt != nullptr && std::strncmp(fmt, "connected to self", 17) == 0) {
             attacker_key = "self-connection";
+        } else if (fmt != nullptr && std::strncmp(fmt, "ERROR: bad-diffbits", 19) == 0) {
+            attacker_key = "bad-diffbits";
+        } else if (fmt != nullptr && std::strstr(fmt, "forked chain older than last checkpoint") != nullptr) {
+            attacker_key = "checkpoint-fork";
         }
         if (!attacker_key.empty() && SuppressRepeatedAttackerLog(attacker_key, log_msg.size())) {
             return;
