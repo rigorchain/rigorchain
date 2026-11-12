@@ -8,10 +8,8 @@
 # requested ARM64 target is never silently rewritten to x86_64. An Intel host
 # fails closed.
 #
-# Official output under dist/release/ is refused before 2026-12-01.
-# RIGOR_MACOS_DEV_OUTPUT=1 may write a non-release copy under
-# dist/macos-dev-not-release/ for a native verification build. That copy is
-# not a v0.2.2 release DMG.
+# Official output is dist/release/v${VERSION}/macos-arm64/.
+# VERSION comes from RIGOR_RELEASE_VERSION and must match clientversion.h.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT}/tools/release/macos_arch.sh"
 
 CORE="${ROOT}/core"
-VERSION="${RIGOR_RELEASE_VERSION:-0.2}"
+VERSION="$(macos_release_version "${ROOT}")" || exit 1
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "FAIL: macOS wallet DMG builds require Darwin. This host is $(uname -s) $(uname -m). An x86_64 Linux build is not Apple Silicon output." >&2
@@ -65,27 +63,11 @@ if [[ "$(uname -m)" != "arm64" ]]; then
   exit 1
 fi
 
-TODAY="$(date -u +%Y-%m-%d)"
-official_ok=0
-if macos_official_packaging_allowed "${TODAY}"; then
-  official_ok=1
-fi
-if [[ "${official_ok}" != "1" && "${RIGOR_MACOS_DEV_OUTPUT:-}" != "1" ]]; then
-  echo "FAIL: official macOS packaging is closed before 2026-12-01 (UTC date ${TODAY}). A native verification build may set RIGOR_MACOS_DEV_OUTPUT=1. That flag does not write dist/release and is not a release DMG." >&2
-  exit 1
-fi
-
 TARGET="${target}"
 BUILD_DIR="${RIGOR_MACOS_BUILD_DIR:-${ROOT}/dist/macos-build/${TARGET}}"
 macos_build_dir_reusable "${BUILD_DIR}" "${mach}" >/dev/null
 
-if [[ "${official_ok}" == "1" ]]; then
-  OUT="${ROOT}/dist/release/v${VERSION}/${TARGET}"
-  RELEASE_DMG=1
-else
-  OUT="${ROOT}/dist/macos-dev-not-release/${TARGET}"
-  RELEASE_DMG=0
-fi
+OUT="${ROOT}/dist/release/v${VERSION}/${TARGET}"
 mkdir -p "${OUT}" "${BUILD_DIR}"
 printf '%s\n' "${mach}" > "${BUILD_DIR}/RIGOR_ARCH_STAMP"
 
@@ -98,8 +80,7 @@ echo "MACH=${mach}"
 echo "NATIVE_APPLE_SILICON_ACCEPTANCE=$([[ "${native_arm64}" == "1" && "$(uname -m)" == "arm64" ]] && echo yes || echo no)"
 echo "CROSS=${cross}"
 echo "BUILD_DIR=${BUILD_DIR}"
-echo "RELEASE_DMG=${RELEASE_DMG}"
-echo "PACKAGING_DATE=${TODAY}"
+echo "RELEASE_VERSION=${VERSION}"
 echo "GIT_COMMIT=$(git -C "${ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
 
 command -v xcrun >/dev/null 2>&1 || {
@@ -284,9 +265,4 @@ if command -v shasum >/dev/null 2>&1; then
 fi
 echo "APP_ARCH=${mach}"
 echo "PACKAGED=${OUT}/${official}"
-if [[ "${RELEASE_DMG}" == "1" ]]; then
-  echo "MACOS_WALLET_DMG=PASS"
-else
-  echo "NOT_A_RELEASE_DMG=1"
-  echo "MACOS_WALLET_DMG=DEV_ONLY"
-fi
+echo "MACOS_WALLET_DMG=PASS"

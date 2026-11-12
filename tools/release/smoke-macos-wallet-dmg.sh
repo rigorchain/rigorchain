@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=macos_arch.sh
+source "${ROOT}/tools/release/macos_arch.sh"
 TARGET="${1:?target macos-arm64}"
 EXPECT_ARCH="${2:?expected uname arch}"
 case "${TARGET}" in
@@ -14,7 +16,7 @@ esac
   echo "FAIL: expected architecture must be arm64, got ${EXPECT_ARCH}" >&2
   exit 1
 }
-VERSION="${RIGOR_RELEASE_VERSION:-0.2}"
+VERSION="$(macos_release_version "${ROOT}")" || exit 1
 DMG="${ROOT}/dist/release/v${VERSION}/${TARGET}/rigor-v${VERSION}-${TARGET}.dmg"
 
 [[ -f "${DMG}" ]] || { echo "FAIL: missing ${DMG}" >&2; exit 1; }

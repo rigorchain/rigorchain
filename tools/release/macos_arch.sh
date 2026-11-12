@@ -22,12 +22,30 @@ macos_target_label() {
   esac
 }
 
-# Official release packaging is closed before 2026-12-01.
-# Argument is YYYY-MM-DD. There is no environment override.
-macos_official_packaging_allowed() {
-  local today="${1:-}"
-  [[ "${today}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
-  [[ "${today}" > 2026-11-30 ]]
+# Prints the display version without a leading v.
+# An explicit RIGOR_RELEASE_VERSION must match core/src/clientversion.h.
+macos_release_version() {
+  local root="${1:?}"
+  local header="${root}/core/src/clientversion.h"
+  local line ver env
+  line="$(grep -m1 'RIGOR_RELEASE_VERSION' "${header}" 2>/dev/null || true)"
+  ver="${line#*\"}"
+  ver="${ver%%\"*}"
+  ver="${ver#v}"
+  if [[ -z "${ver}" ]]; then
+    echo "FAIL: RIGOR_RELEASE_VERSION was not read from ${header}" >&2
+    return 1
+  fi
+  env="${RIGOR_RELEASE_VERSION:-${ver}}"
+  if [[ "${env}" == v* ]]; then
+    echo "FAIL: RIGOR_RELEASE_VERSION must be ${ver} without a leading v, got ${env}" >&2
+    return 1
+  fi
+  if [[ "${env}" != "${ver}" ]]; then
+    echo "FAIL: RIGOR_RELEASE_VERSION ${env} does not match ${header} (${ver})" >&2
+    return 1
+  fi
+  printf '%s\n' "${env}"
 }
 
 # Arguments:

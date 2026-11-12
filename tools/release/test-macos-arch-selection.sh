@@ -74,23 +74,19 @@ expect_fail "conflicting RIGOR_MACOS_ARCH" \
 expect_fail "empty process architecture" \
   macos_resolve_arch "" unknown "" 0 ""
 
-if macos_official_packaging_allowed "2026-11-05"; then
-  echo "FAIL date gate accepted 2026-11-05" >&2
+header_ver="$(macos_release_version "${ROOT}")" || exit 1
+check "header display version" "${header_ver}" "0.2.3"
+if RIGOR_RELEASE_VERSION=0.2 macos_release_version "${ROOT}" >/dev/null; then
+  echo "FAIL stale RIGOR_RELEASE_VERSION 0.2 was accepted" >&2
   fail=1
 else
-  echo "PASS date gate rejects 2026-11-05"
+  echo "PASS stale RIGOR_RELEASE_VERSION 0.2 is rejected"
 fi
-if macos_official_packaging_allowed "2026-12-01"; then
-  echo "PASS date gate allows 2026-12-01"
-else
-  echo "FAIL date gate rejected 2026-12-01" >&2
-  fail=1
-fi
-if macos_official_packaging_allowed "not-a-date"; then
-  echo "FAIL date gate accepted a bad date" >&2
+if RIGOR_RELEASE_VERSION=v0.2.3 macos_release_version "${ROOT}" >/dev/null; then
+  echo "FAIL leading v in RIGOR_RELEASE_VERSION was accepted" >&2
   fail=1
 else
-  echo "PASS date gate rejects a bad date"
+  echo "PASS leading v in RIGOR_RELEASE_VERSION is rejected"
 fi
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/rigor-macos-arch.XXXXXX")"

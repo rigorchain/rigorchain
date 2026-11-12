@@ -14,7 +14,9 @@ set +x
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VERSION="${RIGOR_RELEASE_VERSION:-0.2}"
+# shellcheck source=macos_arch.sh
+source "${ROOT}/tools/release/macos_arch.sh"
+VERSION="$(macos_release_version "${ROOT}")" || exit 1
 ENTITLEMENTS="${ROOT}/tools/release/macos-developer-id.entitlements"
 
 PROBE=0

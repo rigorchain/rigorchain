@@ -1,6 +1,6 @@
 # Real Rigor Wallet DMGs (Qt app bundle). Not an identity stub.
 # GitHub-hosted macOS only. WSL cannot emit Mach-O / UDZO.
-# Official macOS artifact: rigor-v0.2-macos-arm64.dmg
+# Official macOS artifact: rigor-v0.2.3-macos-arm64.dmg
 # macOS x86_64 is not a packaging target.
 # P0-094: CI environment recovery. P0-095: Developer ID signing (defers if secrets missing).
 # P0-101: tags v* must run this workflow (production governance gate).
@@ -15,7 +15,7 @@ on:
   workflow_call:
 
 env:
-  RIGOR_RELEASE_VERSION: "0.2"
+  RIGOR_RELEASE_VERSION: "0.2.3"
   MACOSX_DEPLOYMENT_TARGET: "15.0"
 
 jobs:
@@ -100,7 +100,7 @@ jobs:
           python3 - <<'PY'
           import hashlib
           from pathlib import Path
-          p = Path("dist/release/v0.2/${{ matrix.target }}/rigor-v0.2-${{ matrix.target }}.dmg")
+          p = Path("dist/release/v${{ env.RIGOR_RELEASE_VERSION }}/${{ matrix.target }}/rigor-v${{ env.RIGOR_RELEASE_VERSION }}-${{ matrix.target }}.dmg")
           digest = hashlib.sha256(p.read_bytes()).hexdigest()
           sidecar = Path(str(p) + ".sha256")
           sidecar.write_text(f"{digest}  {p.name}\n", encoding="utf-8")
@@ -110,5 +110,5 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: rigor-v0.2-${{ matrix.target }}-wallet
-          path: dist/release/v0.2/${{ matrix.target }}/rigor-v0.2-*
+          name: rigor-v${{ env.RIGOR_RELEASE_VERSION }}-${{ matrix.target }}-wallet
+          path: dist/release/v${{ env.RIGOR_RELEASE_VERSION }}/${{ matrix.target }}/rigor-v${{ env.RIGOR_RELEASE_VERSION }}-*
