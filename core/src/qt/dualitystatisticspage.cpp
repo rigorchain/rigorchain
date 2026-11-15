@@ -10,6 +10,8 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFont>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -97,14 +99,30 @@ QFrame* makeCard(QWidget* parent, const QString& frame_name, const QString& titl
     layout->setSpacing(space.unit / 2);
     QLabel* title_label = styledLabel(frame, title, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop, true);
     title_label->setObjectName(title_name);
-    // Amounts stay on one line. The U+2009 thousands separator is a line break,
-    // and a word-wrapped label on a wide card keeps an extra line of height for
-    // amounts that contain it. Amounts without a separator then sit lower.
+    // Every amount, unit, and description uses the same one-line box. A U+2009
+    // thousands separator otherwise makes that amount label taller, so amounts
+    // without a separator sit on a different baseline.
     auto* value = styledLabel(frame, kNA, type.balancePx, true, colors.textPrimary, Qt::AlignRight | Qt::AlignVCenter, false);
     value->setObjectName(value_name);
+    value->setTextFormat(Qt::PlainText);
+    value->ensurePolished();
+    QFont amount_font = value->font();
+    amount_font.setPixelSize(type.balancePx);
+    amount_font.setWeight(QFont::Bold);
+    value->setFixedHeight(QFontMetrics(amount_font).height());
     value->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     QLabel* unit_label = styledLabel(frame, unit, type.labelPx, false, colors.textMuted, Qt::AlignRight | Qt::AlignVCenter, false);
-    QLabel* meaning_label = styledLabel(frame, meaning, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop, true);
+    unit_label->ensurePolished();
+    QFont line_font = unit_label->font();
+    line_font.setPixelSize(type.labelPx);
+    line_font.setWeight(QFont::Normal);
+    const int line_height = QFontMetrics(line_font).height();
+    unit_label->setFixedHeight(line_height);
+    // Descriptions stay on one line. A wrapped description is taller and lifts the amount.
+    QLabel* meaning_label = styledLabel(frame, meaning, type.labelPx, false, colors.textMuted, Qt::AlignLeft | Qt::AlignTop, false);
+    meaning_label->setFixedHeight(line_height);
+    meaning_label->setMinimumWidth(0);
+    meaning_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     layout->addWidget(title_label);
     layout->addStretch();
     layout->addWidget(value);
@@ -333,7 +351,14 @@ void DualityStatisticsPage::relayout()
 
 void DualityStatisticsPage::setAmount(QLabel* label, bool available, const QString& text)
 {
-    label->setText(available ? text : kNA);
+    if (!available) {
+        label->setText(kNA);
+        return;
+    }
+    // U+2009 is a line-break opportunity. U+202F is the same narrow gap and does not wrap.
+    QString shown = text;
+    shown.replace(QChar(THIN_SP_CP), QChar(0x202F));
+    label->setText(shown);
 }
 
 void DualityStatisticsPage::setStatusText(QLabel* label, const QString& text)

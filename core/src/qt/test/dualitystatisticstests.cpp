@@ -232,11 +232,15 @@ void DualityStatisticsTests::wideCardsKeepAmountBaselinesLevel()
     QLabel* plain = label(page, "oruFeeValue");
     QLabel* res_plain = label(page, "resSupplyValue");
     QLabel* res_grouped = label(page, "resRemainingValue");
-    QVERIFY(grouped->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(grouped->text().contains(QChar(0x202F)));
+    QVERIFY(!grouped->text().contains(QChar(THIN_SP_CP)));
     QVERIFY(!plain->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(!plain->text().contains(QChar(0x202F)));
     QVERIFY(plain->text().startsWith(QStringLiteral("0.00001210")));
     QVERIFY(!res_plain->text().contains(QChar(THIN_SP_CP)));
-    QVERIFY(res_grouped->text().contains(QChar(THIN_SP_CP)));
+    QVERIFY(!res_plain->text().contains(QChar(0x202F)));
+    QVERIFY(res_grouped->text().contains(QChar(0x202F)));
+    QVERIFY(!res_grouped->text().contains(QChar(THIN_SP_CP)));
     for (QLabel* amount : {grouped, plain, res_plain, res_grouped}) {
         QVERIFY(!amount->wordWrap());
         QCOMPARE(amount->sizePolicy().verticalPolicy(), QSizePolicy::Fixed);
