@@ -9,7 +9,7 @@ import {
 } from "./importerRecovery";
 import { logMismatchEvent } from "./mismatchLog";
 import { rpc } from "./rpcCli";
-import { classifyScriptPubKey, isConvergenceScriptPubKey, type AssetKind } from "./script";
+import { classifyScriptPubKey, indexedOutputAtoms, isConvergenceScriptPubKey, type AssetKind } from "./script";
 import { oruStringToAtoms, resStringToAtoms } from "./amount";
 import { findBodyResMints, rfc020MintProofItems } from "./resMint";
 import { collectConsensusFingerprint, winnerSigmaFromCandidates } from "./consensusFingerprint";
@@ -547,10 +547,13 @@ async function importBlockAtHeight(
 
         const rpcValue = v?.value != null ? asString(v.value) : "0";
 
-        let value_atoms: bigint = 0n;
-        if (asset_kind === "ORU") value_atoms = oruStringToAtoms(rpcValue);
-        else if (asset_kind === "RES") value_atoms = resStringToAtoms(rpcValue);
-        else value_atoms = 0n;
+        const rawAtoms =
+          asset_kind === "ORU"
+            ? oruStringToAtoms(rpcValue)
+            : asset_kind === "RES"
+              ? resStringToAtoms(rpcValue)
+              : 0n;
+        const value_atoms = indexedOutputAtoms(asset_kind, rawAtoms);
 
         const outMeta: OutputMeta = {
           vout_index,

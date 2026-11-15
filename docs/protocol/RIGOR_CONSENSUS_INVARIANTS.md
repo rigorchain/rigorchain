@@ -178,6 +178,8 @@ RES_MAX_SUPPLY = (S / P0) × 2^25
                = 2^22 RES
 ```
 
+That product is the integral of the real-valued ceiling `S / destroy_cost(h)` from height 0 to infinity. It is not the sum of the integer per-block maxima, and it is not an amount the chain can mint.
+
 `P0` is `RES_DESTROY_COST_GENESIS`: the ORU destroyed to mint one whole RES at height 0. The pole `2^25` is `RES_DESTROY_POLE`. The consensus mint check does not use a displayed price. It evaluates:
 
 ```
@@ -196,7 +198,7 @@ RES cannot be:
 
 `GetBlockSubsidy` returns ORU only. Mainnet coinbase RES must be 0 (`bad-cb-res-amount`). A body transaction creates RES only by destroying ORU in the same transaction. The predicate is a pure function of `(R, B, h)`. No key is a mint authority.
 
-The supply boundary is enforced by consensus. There is no cumulative RES counter: the cap follows from this per-transaction predicate together with the ORU issuance rule. All ORU comes from the 128 ORU subsidy at heights ≥ 1, and ORU created at height k can only be destroyed at heights ≥ k, where each atom buys at most 2^40 / (2^25 + k)^2 RES atoms. Summing over all heights gives a total strictly below 128·10^8 · 2^40 / 2^25 = 2^22 RES. An exact sum over heights 1 to 2^31 − 1 (audit Round 2A, C11) stays 6,453,855,391,584 atoms below `RES_MAX_SUPPLY`.
+A single transaction with `R` above `RES_MAX_SUPPLY` is rejected. Block validation does not keep a cumulative RES counter. Height 0 creates no ORU. ORU created at height `k ≥ 1` can be destroyed only at a height `≥ k`. Along the schedule that destroys each subsidy at the height it is created, `Σ_{h≥1} (128·10^8 · 2^40) / (2^25 + h)^2` is strictly below `128·10^8 · 2^40 / 2^25 = 2^22` RES, because `Σ_{k=2^25+1}^{∞} 1/k^2 < 2^{-25}`. The integer predicate admits only the floor of each term, so the admitted total is strictly below `RES_MAX_SUPPLY`. The constant is that upper bound. It is not an amount the chain can mint.
 
 Changing:
 
@@ -303,6 +305,8 @@ Witness v0 is ORU only at program length 20. Witness version is `0x00`. Witness 
 Convergence is the 22-byte script `PUSHBYTES_20 || 20-byte HASH160 || 0xbd`. `0xbd` means this ORU output is destroyed. Opcode meaning is consensus meaning. Changing `OP_CONVERGE` semantics changes the monetary protocol.
 
 `OP_RETURN` is byte `0x6a` followed by pushes. Its value must be 0. A non-zero value is not a burn and not a third asset.
+
+Byte `0xbb` is recognized when the script is the canonical encoding `<CScriptNum height> <20-byte hash> 0xbb`. `ClassifyRigorTxout` returns `TxoutType::RES_MINT` for that encoding, and `AssetTypeFromScriptPubKey` returns `ASSET_RES`, so `IsAllowedScript` does not reject the byte by itself. Recognition is not acceptance. `CheckTransaction` rejects a non-coinbase output with that script (`bad-txns-res-mint-noncoinbase`). On mainnet a coinbase whose RES output value is not 0 is rejected with `bad-cb-res-amount`. `0xbb` does not create RES.
 
 The protocol does not contain:
 
@@ -547,7 +551,7 @@ The 14 cases are one suite. Section 10 lists fewer rows because that table names
 | `res_cannot_convert_to_oru` | RES inputs alone cannot create ORU (`illegal-res-to-oru-conversion`). | [`tx_verify.cpp`](../../core/src/consensus/tx_verify.cpp) |
 | `script_templates_are_closed` | The four templates classify to their assets. P2WSH, P2PKH, `CVG2`, and `RES2` are rejected. | [`rigor_classify.cpp`](../../core/src/script/rigor_classify.cpp) |
 | `only_listed_templates_pass_checktransaction` | `CheckTransaction` accepts those templates. `OP_RETURN` value must be 0. | [`tx_check.cpp`](../../core/src/consensus/tx_check.cpp) |
-| `opcode_bytes_keep_consensus_meaning` | `0x6a`, `0xbd`, and `0xbb` are asset markers. `0xbc` is burned. `0xac` is inert and is not `CHECKSIG`. | [`rigor_bytes.h`](../../core/src/script/rigor_bytes.h), [`rigor_opcode_namespace.cpp`](../../core/src/script/rigor_opcode_namespace.cpp) |
+| `opcode_bytes_keep_consensus_meaning` | `0x6a` is RETURN. `0xbd` is the Convergence marker. `0xbb` is classified as a mint-shaped script and does not create RES (`bad-txns-res-mint-noncoinbase` on a body transaction; mainnet coinbase RES other than 0 is `bad-cb-res-amount`). `0xbc` is burned. `0xac` is inert and is not `CHECKSIG`. | [`rigor_bytes.h`](../../core/src/script/rigor_bytes.h), [`tx_check.cpp`](../../core/src/consensus/tx_check.cpp) |
 | `authorization_is_ed25519_only` | Public key is 32 bytes. Signature is 64 bytes. Domains are `RGRORU01` and `RGRRES01`. A 33-byte secp public key is rejected. | [`predicate_verify.cpp`](../../core/src/script/predicate_verify.cpp) |
 | `ledger_is_utxo_admission` | ORU and RES enter the UTXO set. Convergence and `OP_RETURN` do not. | [`coins.cpp`](../../core/src/coins.cpp) |
 | `pow_is_sha3_rgrpow01` | Domain `RGRPOW01`, 80-byte header, SHA3-256 digest, and `CheckProofOfWork`. | [`pow_digest.cpp`](../../core/src/rigor_kernel/pow_digest.cpp), [`pow.cpp`](../../core/src/pow.cpp) |

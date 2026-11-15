@@ -229,9 +229,8 @@ Source: `core/src/rigor_kernel/pow_digest.h`, `core/src/pow.cpp`.
 Block **id** remains SHA256d of the 80-byte header. Merkle / txid remain
 SHA256d.
 
-The retired 64 KiB / 256-round mix in `pow_opus.cpp` remains in-tree and
-locked in `rigor_consensus_lock.h`. It is **not** OpuHash and is **not**
-the live `CheckProofOfWork` digest.
+`GetOpusHash` is defined in `pow_opus.cpp`. It is not OpuHash, and
+`CheckProofOfWork` does not call it.
 
 ### ASERT
 
@@ -361,7 +360,7 @@ Numeric SSOT with `tools/res_continuous_price_schedule.py`.
 | Stale claim | Current code |
 |-------------|--------------|
 | Historical `v0.1.1` display channel | Display version in `core/src/clientversion.h` (`RIGOR_RELEASE_VERSION`) |
-| OpuHash is the retired 64 KiB mix | OpuHash **is** SHA3-256 `"RGRPOW01" \|\| header_80` |
+| `GetOpusHash` is the mining digest | OpuHash is FIPS SHA3-256 `"RGRPOW01" \|\| header_80`, via `GetRigorPowHash` |
 | ASERT half-life 172800 s | **43200 s** |
 | `R(0) = 1000 ORU` | `R(0) = 0` |
 | `IsConvergeScript` in `interpreter.cpp` | `rigor_classify.cpp` / `predicate_verify.h`; no VM |

@@ -39,11 +39,10 @@ are not useful to us.
 
 ## What we already know
 
-Read [docs/verification/FORMAL-VERIFICATION-VERDICT.md](docs/verification/FORMAL-VERIFICATION-VERDICT.md) §3 before
-reporting. It states plainly which properties are machine-checked and which are not — in
-particular there is no mechanized refinement between the Coq model and the C++ node, and
-the draw is modeled as a function rather than as a game, so no theorem bounds an attacker's
-advantage. A finding in one of those gaps is genuinely new information and we want it. A
+Read [docs/verification/FORMAL-VERIFICATION-STATUS.md](docs/verification/FORMAL-VERIFICATION-STATUS.md)
+before reporting a “formal proof” gap. There is no mechanized refinement between the Coq
+model and the C++ node. Production issuance is the RFC-020 inequality, not a selection
+function. A finding that the node and a model disagree is new information. A
 report that the gap exists is not, because we documented it ourselves.
 
 The known-open items are tracked under [docs/security/](./docs/security).

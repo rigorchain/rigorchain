@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""RES issuance simulation: CONVERGENCE lottery vs deterministic rate.
+"""Floating-point comparison of two epoch models. Not production issuance.
 
-Parameters mirror core/src/consensus/rigor_consensus_lock.h and params.h exactly.
-No side effects; prints a JSON blob and a summary table.
+This script does not implement GetBlockSubsidy, CheckResMintArithmetic, or
+transaction validation. It does not report chain supply.
+
+Production subsidy is 0 ORU at height 0 and 128 ORU at every height >= 1.
+Production RES_MAX_SUPPLY is 2^22 RES (4,194,304 RES, 419,430,400,000,000
+atoms at 1e8 atoms per RES).
+
+The numbers below are this experiment only: a 21,000,000 unit cap, a 1e6
+display unit, epoch subsidies of 1000 then 125, and a lottery-versus-rate
+comparison. Heights are epoch indexes 0..250 times 210,000 blocks. Totals
+are floating-point products, not integer mint floors.
 """
 import json
 import math
@@ -12,7 +21,8 @@ COIN = 100_000_000
 RES_REWARD_GENESIS = 40 * RES_COIN
 RES_REWARD_EPOCH = 210_000
 RES_REWARD_LAST_EPOCH = 250
-RES_MAX_SUPPLY = 21_000_000 * RES_COIN
+# Experiment cap. Not RES_MAX_SUPPLY from res_issuance.h (2^22 RES).
+EXPERIMENT_CAP = 21_000_000 * RES_COIN
 C_ORU_PER_MINT = 1024          # 2^(256-246) / 1e8, in whole ORU
 ORU_GENESIS_SUBSIDY = 1000
 ORU_TAIL_SUBSIDY = 125
@@ -95,18 +105,20 @@ def main():
         tot_d = rows[-1]["cum_res_det"]
         e0_l = rows[0]["epoch_res_lottery"]
         e0_d = rows[0]["epoch_res_det"]
-        print(f"rho={rho:>5.2f}  lottery total={tot_l:12,.0f} RES ({tot_l/21e6:6.2%} of cap)"
+        print(f"rho={rho:>5.2f}  experiment lottery total={tot_l:12,.0f} units "
+              f"({tot_l/21e6:6.2%} of the 21000000-unit experiment cap)"
               f"  epoch0 share={e0_l/tot_l:6.2%}"
-              f"   |  det total={tot_d:12,.0f} ({tot_d/21e6:6.2%})"
+              f"   |  experiment rate total={tot_d:12,.0f} ({tot_d/21e6:6.2%})"
               f"  epoch0 share={e0_d/tot_d:6.2%}"
-              f"   |  det/lottery={tot_d/tot_l:5.2f}x")
+              f"   |  rate/lottery={tot_d/tot_l:5.2f}x")
 
     print()
     print("schedule sanity:")
     sched_sum = sum(res_reward_for_epoch(k) for k in range(RES_REWARD_LAST_EPOCH + 1))
-    print(f"  sum W(k)        = {sched_sum/RES_COIN:,.6f} RES")
-    print(f"  x epoch length  = {sched_sum*RES_REWARD_EPOCH/RES_COIN:,.0f} RES (absolute max)")
-    print(f"  cap             = {RES_MAX_SUPPLY/RES_COIN:,.0f} RES")
+    print(f"  sum W(k)        = {sched_sum/RES_COIN:,.6f} experiment units")
+    print(f"  x epoch length  = {sched_sum*RES_REWARD_EPOCH/RES_COIN:,.0f} experiment units (model maximum)")
+    print(f"  experiment cap  = {EXPERIMENT_CAP/RES_COIN:,.0f} units "
+          f"(not production 2^22 RES)")
     print(f"  W(0)={res_reward_for_epoch(0)/RES_COIN}  W(1)={res_reward_for_epoch(1)/RES_COIN:.6f}"
           f"  W(10)={res_reward_for_epoch(10)/RES_COIN:.6f}  W(250)={res_reward_for_epoch(250)/RES_COIN:.6f}")
     print(f"  RATE(0)={C_ORU_PER_MINT/(res_reward_for_epoch(0)/RES_COIN):.2f} ORU/RES"

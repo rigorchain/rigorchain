@@ -36,8 +36,8 @@ Design a **production-grade official website** for RIGOR at `www.rigorchain.com`
 | Surface | Route | Data |
 |---------|-------|------|
 | Protocol state | `/explorer`, `/network` | RPC + explorer |
-| Convergence visualization | `/explorer` | `getconvergencestatus`, `getconvergenceresult` |
-| RES mint lifecycle (observer) | `/explorer` | `/api/res/mints`, `getresmintstatus` |
+| Convergence visualization | `/explorer` | `getconvergencestatus`, `getblockconvergence` |
+| RES mint lifecycle (observer) | `/explorer` | `/api/res/mints`, `getconvergencestatus` |
 | Mining + network health | `/network` | `getnetworkinfo`, `getblockchaininfo` |
 | Formal verification status | `/verification` | PROOF-034, P03, golden vectors (GV) |
 

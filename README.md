@@ -107,7 +107,7 @@ RIGOR monetary behavior is defined by a small set of immutable consensus constan
 
 | Parameter | Value | Meaning |
 |---|---|---|
-| ORU block subsidy | 2^7 | 128 ORU per block |
+| ORU block subsidy | 2^7 | 0 ORU at height 0; 128 ORU at every height ≥ 1 |
 | Initial RES destruction cost | 2^10 | 1024 ORU per RES at initial scale |
 | Convergence scale parameter | 2^25 | Controls RES cost growth |
 | Theoretical maximum RES supply | 2^22 | 4,194,304 RES |
@@ -238,9 +238,8 @@ Extracted facts:
 RIGOR =
     Dual Native Assets
   + UTXO Monetary Model
-  + Consensus-defined Issuance Conditions
-  + Deflationary Fee Burn
-  + Probabilistic Convergence Selection
+  + Deterministic Convergence
+  + RES-transfer ORU fee destruction
   + Adaptive Proof-of-Work (ASERT)
   + Cryptographic Ownership (Ed25519)
 ```
@@ -248,13 +247,25 @@ RIGOR =
 Consensus state is the UTXO set plus validation rules. Rebuildable indexes
 are not monetary truth.
 
-- Ordinary transfers cannot mint.
-- ORU coinbase subsidy and coinbase RES mint are explicit exceptions.
+- Ordinary transfers cannot mint ORU or RES.
+- ORU enters through the coinbase subsidy: **0** at height 0 and **128 ORU**
+  at every height ≥ 1. That subsidy is the mining-related issuance path.
+- RES is not a coinbase reward. On mainnet the coinbase RES amount must be
+  **0**. A nonzero coinbase RES amount is rejected with `bad-cb-res-amount`.
+- RES is created only in a body transaction. That transaction destroys ORU
+  in one `RIGOR_MARKER_CONVERGE` (`0xbd`) output of `B` ORU atoms and may
+  create Witness v1 RES outputs summing to `R` RES atoms. At confirming
+  height `h`, `R > 0` is valid only when `R · (2²⁵ + h)² ≤ B << 40`.
+  `R = 0` is a plain destroy. The rule is deterministic. There is no draw
+  and no winner.
 - `ConnectBlock` is the admission path. Explorer display is observation.
 
 There is **no Bitcoin Script VM**. Spends are structured predicates
-(`VerifyRigorPredicate`). Live markers: RETURN `0x6a`, RES mint
-`0xbb`, CONVERGE `0xbd`.
+(`VerifyRigorPredicate`). Accepted markers are RETURN `0x6a` (NULL_DATA,
+value 0) and CONVERGE `0xbd`. `0xbb` is not a valid RES mint marker.
+Recognizing a byte in the classifier does not make a transaction that uses
+it valid: a body transaction carrying `0xbb` is rejected with
+`bad-txns-res-mint-noncoinbase`.
 
 Mathematics: [`docs/whitepaper/RIGOR_MATHEMATICAL_CONSENSUS_DESIGN.md`](docs/whitepaper/RIGOR_MATHEMATICAL_CONSENSUS_DESIGN.md).  
 Opcode table: [`docs/specification/RIGOR_OPCODE_SPECIFICATION.md`](docs/specification/RIGOR_OPCODE_SPECIFICATION.md).
@@ -289,11 +300,16 @@ is not a UTXO and not a wallet balance.
 
 ## 5. Mining
 
-**Node consensus PoW** is SHA3-256 over a domain-tagged header:
+**Node consensus PoW** is OpuHash: FIPS 202 SHA3-256 over a domain-tagged
+header (domain suffix `0x06`):
 
 ```
 digest = SHA3-256("RGRPOW01" || header_80)
 ```
+
+OpuHash is not Ethereum Keccak-256 (suffix `0x01`). The block identifier
+is SHA256d of the same 80-byte header, not the OpuHash digest.
+`CheckProofOfWork` calls `GetRigorPowHash`. It does not call `GetOpusHash`.
 
 Difficulty is ASERT (aserti3-2d), mainnet half-life **12 hours** (43200 s),
 anchor height 1, ±12.5% per-block clamp. Target spacing 10 minutes.
@@ -415,7 +431,6 @@ A past tag’s notes (example): [`docs/release/RIGOR_V0.1.3_RELEASE_NOTES.md`](d
 |------|---------|
 | `core/` | Full node, wallet, consensus |
 | `docs/` | Active documentation (`docs/README.md`) |
-| `archive/` | Historical RFC / design / formal records (not normative) |
 | `explorer/`, `miner/`, `web/` | Product components |
 | `verification/` | Public verification map |
 | `formal_verification/` | Coq model, golden vectors, manifests |

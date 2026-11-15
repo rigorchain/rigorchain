@@ -254,8 +254,11 @@ outputs from body transactions that pass `CheckResMintArithmetic`.
 ∀ h:  S_RES(h) ≤ 419430400000000
 ```
 
-**Failure condition:** Total RES supply exceeds `419430400000000` atoms at any
-height, or a mint is accepted when the cap is already reached.
+**Failure condition:** A single transaction is accepted with `R` above
+`419430400000000` RES atoms. `CheckResMintArithmetic` rejects that `R`.
+Validation does not keep a cumulative RES counter and does not reject a
+mint because a running total has already reached the cap. The cap is the
+closed-form upper bound from RFC-020.
 
 **Related rules:** CR-045
 

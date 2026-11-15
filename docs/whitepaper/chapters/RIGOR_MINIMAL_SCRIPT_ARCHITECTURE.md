@@ -230,12 +230,12 @@ Allowed chain outputs are a closed set:
 
 | Allowed output | Role |
 |----------------|------|
-| Witness v0, 20-byte program | ORU P2WPKH |
-| Witness v0, 32-byte program | ORU P2WSH (inner script) or native 32-byte Ed25519 commitment |
-| Witness v1, 32-byte program | RES (non-CVG2) or CVG2 Convergence commitment (ORU domain) |
-| Zero-value `OP_RETURN` | Data commitment (e.g. coinbase RIGOR tag) |
+| Witness v0, 20-byte program | ORU. Spend: witness `<sig64><pk32>`, program = HASH160(pk) |
+| Witness v1, 32-byte program, not `CVG2` or `RES2` | RES. The program is the Ed25519 public key |
+| 22-byte `HASH160 \|\| 0xbd` | ORU destroy. Not a UTXO |
+| Zero-value `0x6a` | NULL_DATA |
 
-Rejected as consensus outputs include P2PKH, P2SH, bare multisig, unknown witness versions, and Taproot control-block spends.
+A 32-byte witness v0 program (P2WSH) is `NONSTANDARD` and is not an ORU output. P2PKH, P2SH, bare multisig, Taproot, and secp256k1 CHECKSIG are not consensus templates. There is no Script VM.
 
 Spend signatures are **Ed25519 only**. secp256k1 / ECDSA CHECKSIG hard-fails (`SCRIPT_ERR_SECP256K1_DISABLED`).
 
@@ -252,48 +252,32 @@ RIGOR accepts less expressiveness so that every honest node can carry that respo
 
 ---
 
-## 6. RIGOR Script Model Analysis
+## 6. RIGOR Script Model
 
-This section is an audit of the current implementation. It does **not** claim “no scripts.”
+Production RIGOR classifies output scripts and authorizes spends with `VerifyRigorPredicate`. It does not execute a Bitcoin Script program. `OP_DUP`, `OP_HASH160`, `OP_EQUALVERIFY`, and `OP_CHECKSIG` are not RIGOR instructions.
 
-RIGOR minimizes script complexity rather than eliminating scripts. The protocol intentionally restricts execution semantics to preserve deterministic verification and reduce consensus attack surface.
+Accepted shapes:
 
-Actual execution surfaces:
+| Surface | What consensus checks |
+|---------|------------------------|
+| Witness v0, 20-byte program | ORU. Witness is `<sig64><pk32>`. The program is HASH160 of the 32-byte Ed25519 key. Signing domain `RGRORU01` |
+| Witness v1, 32-byte program | RES, when the program does not begin with `CVG2` or `RES2`. The program is the public key. Witness is `<sig64><pk32>` with `pk` equal to the program. Signing domain `RGRRES01` |
+| 22-byte converge script | ORU destroy (`0xbd`). Not inserted into the UTXO set. Not spendable |
+| Zero-value `0x6a` | Data. Asset NONE |
 
-| Surface | What runs |
-|---------|-----------|
-| Witness v0 | ORU P2WPKH implied script (32-byte pubkey; program = HASH160(pk)) |
-| P2WSH (v0, 32-byte program) | Inner witness script at `SigVersion::WITNESS_V0` — largest inherited surface |
-| Witness v1 | RES Ed25519 key-path; program = pk32; spend requires `pk == program`; no RES2 spend |
-| Signature verification | Ed25519 only; secp256k1 CHECKSIG → `SCRIPT_ERR_SECP256K1_DISABLED` |
-| CVG2 validation | Structural commitment check; unspendable; not inserted into the UTXO set |
+A 32-byte witness v0 program is P2WSH. `ClassifyRigorTxout` does not accept it. The output is `NONSTANDARD`. No inner witness script runs, and timelock opcodes are not executed.
 
-### Supported script families
+`0xbb` is not a creatable RES mint template. A body transaction that carries it is rejected with `bad-txns-res-mint-noncoinbase`.
 
-#### Witness v0
+Ed25519 is the spend signature. secp256k1 CHECKSIG is not an authorization path.
 
-Used for:
+### Witness v0
 
-- Bitcoin-compatible UTXO spending
-- compatibility layer
-- ORU ownership
+The only witness v0 consensus output is the 20-byte ORU program.
 
-| Program | Spend model |
-|---------|-------------|
-| 20-byte (`P2WPKH`) | Two-item witness; implied `DUP HASH160 EQUALVERIFY CHECKSIG`; CHECKSIG is Ed25519 over the 32-byte pubkey; program is HASH160(pk) |
-| 32-byte (`P2WSH`) | Last witness item is the witness script; SHA256 must match the program; inner script runs at `SigVersion::WITNESS_V0` with Ed25519-only CHECKSIG |
+### Witness v1
 
-**P2WSH is the largest inherited execution surface.** Inner scripts may still use Bitcoin-shaped opcodes (including timelocks) under witness v0 rules. That surface is real. It is also bounded: new bare / P2SH / P2PKH outputs are consensus-invalid, and CHECKSIG cannot take the secp256k1 path.
-
-`SigVersion::WITNESS_V0` is the ORU P2WPKH signing domain (`RGRORU01`). There is no `SigVersion::BASE`; P2PKH templates are not a consensus spend path.
-
-#### Witness v1 reserved usage
-
-Witness v1 is reserved for:
-
-- Convergence outputs (CVG2)
-- Native asset programs (RES)
-- Ed25519 ownership model
+Witness v1 is the RES key path. It is not a Convergence container.
 
 | 32-byte v1 program | Classification | Spend |
 |--------------------|----------------|-------|
@@ -309,7 +293,7 @@ A 36-byte “claim program” size exists in headers for historical wallet/seman
 
 Witness v1 on Bitcoin is Taproot: output key, annex, merkle script paths, tapscript, control blocks. RIGOR removed that path from consensus validation. Comments in `validation.cpp` and `predicate_verify.cpp` record the deletion: no control blocks, no annex, no script-path spends. There is no `interpreter.cpp`.
 
-Witness v1 here is a **BIP141-shaped** version byte reused as a native asset and Convergence container. Sharing a version number with Bitcoin Taproot is not sharing Taproot’s VM.
+Witness v1 here is a BIP141-shaped version byte used as the RES public key. Sharing a version number with Bitcoin Taproot is not sharing Taproot’s VM. Convergence is the 22-byte `0xbd` script, not a witness v1 program.
 
 | Bitcoin Taproot (BIP341) | RIGOR Witness v1 |
 |--------------------------|------------------|

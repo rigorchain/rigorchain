@@ -23,8 +23,8 @@ Database stores derived representations.
 
 The indexer is a transformation layer only. API output is a derived view
 (`API_Response = Derived_View(consensus_data)`). Identity:
-[`../whitepaper/RIGOR_PROTOCOL_IDENTITY.md`](../whitepaper/RIGOR_PROTOCOL_IDENTITY.md). Database reset:
-[`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATION_NOTES.md).
+[`../whitepaper/RIGOR_PROTOCOL_IDENTITY.md`](../whitepaper/RIGOR_PROTOCOL_IDENTITY.md).
+A rebuilt index starts from genesis using the current classifier.
 
 ---
 
@@ -64,14 +64,13 @@ Provide a **protocol-correct**, **read-only** indexing and visibility layer for 
 │  Indexer API service                                              │
 │  - block importer                                                   │
 │  - tx decoder cache                                                 │
-│  - convergence enricher (getconvergenceresult)                      │
-│  - convergence lineage linker                                       │
-│  - mismatch alerter (root committed vs computed)                    │
+│  - convergence rows from block transactions and getblockconvergence │
+│  - mint rows from body transactions that destroy ORU and create RES │
 └────────────────────────────┬─────────────────────────────────────┘
                              │ JSON-RPC 1.1 (loopback)
 ┌────────────────────────────▼─────────────────────────────────────┐
-│  rigord (NODE-C pattern)                                            │
-│  -testnet, txindex=1, no wallet, rpcbind=127.0.0.1                  │
+│  rigord                                                            │
+│  txindex=1, no wallet, rpcbind=127.0.0.1                            │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,7 +80,7 @@ Provide a **protocol-correct**, **read-only** indexing and visibility layer for 
 |-----------|----------------|----------|
 | **rigord** | Full validation, chainstate, STABLE RPC | Be replaced by indexer for validity |
 | **Importer** | Persist blocks/headers/txs from RPC | Recompute mint arithmetic as a second authority |
-| **Enricher** | Attach convergence rows per block | Invent eligibility without `getconvergenceresult` |
+| **Enricher** | Attach `0xbd` destroys and body-tx RES mints from the block | Treat a draw, a winner, or a missing RPC as issuance |
 | **API** | Serve sorted, labeled ORU/RES views | Expose `invalidateblock` or wallet keys |
 | **UI** | Display indexed fields + disclaimers | Merge ORU+RES balances |
 
@@ -95,18 +94,17 @@ Per closed topology: **NODE-C** hosts `rigord` + indexer + API. NODE-A holds spe
 
 ### 4.1 Primary ingestion paths
 
-| Phase | RPC methods | Notes |
+| Phase | RPC methods this explorer calls | Notes |
 |-------|-------------|-------|
-| **Initial sync** | `getblockhash`, `getblock` (verbosity 2), `getblockheader` | Height-ordered import genesis → tip |
-| **Convergence backfill** | `getconvergenceresult` | One call per block (or height); store full candidate array |
-| **Incremental** | `getbestblockhash`, `getblock` | On new tip; detect hash change at same height → reorg |
-| **Tx detail** | `getrawtransaction` (verbose) | Requires `txindex=1` |
-| **RES history** | `listconvergencehistory` | Cross-check mint block list |
-| **Chain status** | `getblockchaininfo`, `getconvergencestatus` | Tip metrics, cumulative convergence |
+| **Initial sync** | `getblockhash`, `getblock` (verbosity 2) | `explorer/src/importer.ts` |
+| **Block body** | `getblock` | Destroy outputs are read from the block, not from a separate convergence RPC |
+| **Tip** | `getblockhash`, `getblock` | Hash change at the same height is the reorg signal in the importer |
+| **Tx detail** | `getrawtransaction` (verbose true) | The call passes `true` |
+| **Chain status** | `getblockchaininfo`, `getnetworkinfo`, `getconvergencestatus`, `getruntimesupply`, `getrawmempool` | `getrawmempool` is called with no arguments. Its `verbose` argument defaults to false |
 
 ### 4.2 Forbidden ingestion
 
-- `getconvergeinfo` (UNSTABLE stub)
+- `getconvergeinfo` is not a registered RPC
 - Retired fields: `rigor_target`, `res_draw_target`, `res_target_ctx`
 - Nonexistent RPC: `getconvergencedrawcandidates`
 - Wallet RPC on indexer node (no wallet loaded)
@@ -137,9 +135,7 @@ Use `decoderawtransaction` / verbose `getrawtransaction` for script and witness 
 | `blocks` | Header fields + Rigor extensions | `block_hash` |
 | `transactions` | Raw hex, txid, wtxid, block link | `txid` |
 | `outputs` | Per-vout script, value, inferred asset | `(txid, vout)` |
-| `convergence_results` | Full `getconvergenceresult` JSON per block | `block_hash` |
-| `convergence_candidates` | Normalized candidate rows | `(block_hash, txid)` |
-| `convergence_events` | ORU convergence txs (`OP_CONVERGE` destroy; may mint RES) | `(block_hash, convergence_txid)` |
+| `convergence_events` | ORU convergence transactions (`0xbd` destroy; the same transaction may mint RES) | `(block_hash, convergence_txid)` |
 | `res_mints` | RFC-020 body-tx mint: same txid destroys ORU and creates RES | `(mint_txid, mint_vout_index)` |
 | `chain_meta` | Importer tip, last good height | singleton |
 
@@ -154,7 +150,7 @@ See `CLOSED_TESTNET_EXPLORER_DEPLOYMENT.md` for sizing.
 
 ### 6.3 Immutability
 
-Blocks at height `h` are immutable **until reorg**. On reorg, delete rows with `height > fork_point` (see `EXPLORER_REORG_STRATEGY.md`) — never UPDATE in place without audit log.
+Blocks at height `h` are immutable until a reorg. On a reorg, delete rows above the fork and import the new chain from the node.
 
 ### 6.4 Pre-mainnet database reset
 
@@ -163,11 +159,7 @@ classifications. Public network launch will rebuild the explorer view and
 indexed observations from genesis using current consensus classification
 rules.
 
-No production CVG2 migration is required. Historical CVG2 conversion is not
-a consensus concern. `OP_CONVERGE` is the only live Convergence
-classification. Fresh indexing starts from genesis for public launch.
-
-Policy: [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATION_NOTES.md).
+`OP_CONVERGE` (`0xbd`) is the Convergence classification. Fresh indexing starts from genesis.
 
 ---
 
@@ -175,13 +167,12 @@ Policy: [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATI
 
 | Use case | Identifier | Rule |
 |----------|------------|------|
-| Primary keys, URLs, convergence set F | **txid** | Mandatory |
-| Draw winner, candidate list | **txid** | Observer-only; RFC-019 issuance is the mint txid itself |
-| Convergence lineage edges | **txid** | Convergence tx identity |
+| Primary keys and URLs | **txid** | Mandatory |
+| Convergence transaction and its RES outputs | **txid** | The mint, when present, is that body transaction under the RFC-020 inequality |
 | Mempool display (if added) | wtxid optional secondary | Label as “witness id”; never primary |
 | Foreign keys / JOINs | **txid** only | wtxid display-only column |
 
-**Regression lock (P3):** For a known RES block, indexed eligible txid set MUST equal RPC `candidates[].txid` where `draw_eligible=true`.
+Indexed RES mints are body transactions in the block, not a winner list.
 
 ---
 
@@ -189,12 +180,8 @@ Policy: [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATI
 
 | Parameter | Value / policy |
 |-----------|----------------|
-| Bind depth (consensus) | `k = 10` (`CONVERGENCE_DRAW_BIND_DEPTH`) |
-| Closed-testnet reorg test target | Up to **6 blocks** (ops runbook); indexer MUST handle **≥ 10** rollback depth |
-| Detection | `getbestblockhash` change or same-height hash mismatch |
-| Action | Truncate DB above fork; re-import; re-run `getconvergenceresult` for affected range |
-
-Full procedure: `EXPLORER_REORG_STRATEGY.md`.
+| Detection | `getbestblockhash` change, or the same height with a different hash |
+| Action | Truncate the index above the fork and re-import from `getblock` / `getblockconvergence` |
 
 ---
 
@@ -202,15 +189,10 @@ Full procedure: `EXPLORER_REORG_STRATEGY.md`.
 
 | Document | Topic |
 |----------|-------|
-| `RIGOR_CHAIN_DATA_MODEL.md` | Canonical entities |
 | `EXPLORER_RPC_COMPATIBILITY_MATRIX.md` | RPC tiers |
 | `RES_INDEXING_RULES.md` | RES/ORU/convergence indexing |
-| [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATION_NOTES.md) | Development-observation discard; genesis reindex |
-| `WITNESS_V1_DISPLAY_RULES.md` | PCORB display |
+| `WITNESS_V1_DISPLAY_RULES.md` | Witness v1 display |
 | `EXPLORER_SECURITY_BOUNDARIES.md` | Forbidden behaviors |
-| `EXPLORER_GO_NO_GO.md` | Launch gates |
-
-**Upstream (repo root):** `EXPLORER_RPC_STABILITY_MATRIX.md`, `CLOSED_TESTNET_EXPLORER_BOOTSTRAP.md`, `CLOSED_TESTNET_NODE_TOPOLOGY.md`.
 
 ---
 
@@ -224,4 +206,4 @@ Full procedure: `EXPLORER_REORG_STRATEGY.md`.
 | Replay impact | **INDIRECT** — wrong display mimics consensus failure |
 | Determinism impact | **INDIRECT** — API must use explicit sorts |
 | Indexing risk | **MEDIUM** |
-| Minimal safe recommendation | Poll NODE-C; index `getconvergenceresult`; txid-only keys; alert on root mismatch |
+| Minimal safe recommendation | Follow the node tip; index `getblock` and `getblockconvergence`; txid keys |

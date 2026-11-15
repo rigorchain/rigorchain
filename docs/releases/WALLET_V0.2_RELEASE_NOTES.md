@@ -21,9 +21,9 @@ The product tag is **v0.2**.
 
 ## What this release is
 
-Wallet v0.2 is the first stable **mainnet** GitHub installable for the
-current RFC-020 / RFC-018 wallet source. There is no v0.2.1 upgrade
-history. Do not look for a v0.2.1 package.
+Wallet v0.2 is the 2026-09-15 mainnet installable for the RFC-020 / RFC-018
+wallet source at tag `v0.2`. Later tags `v0.2.1`, `v0.2.2`, and `v0.2.3`
+are separate releases. Their notes are under `docs/release/`.
 
 ---
 
@@ -77,7 +77,7 @@ not by a second wallet formula.
 
 ## What this is not
 
-- Not Wallet v0.2.1  
+- Not the v0.2.1, v0.2.2, or v0.2.3 release
 - Not a consensus-parameter change  
 - Not CPP verified  
 - Not “formally verified production binary”  

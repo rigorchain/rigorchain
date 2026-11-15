@@ -94,23 +94,9 @@ Source: `ClassifyRigorTxout` / `AssetTypeFromScriptPubKey` in
 | Converge | `14` + 20-byte HASH160 + `bd` (22 bytes) | `CONVERGE` | ORU | **No** (not a UTXO) |
 | NULL_DATA | `6a` + pushes, `nValue = 0` | `NULL_DATA` | NONE | No |
 
-Anything else is `NONSTANDARD` → `ASSET_INVALID` → `bad-rigor-script-type`.
+Anything else is `NONSTANDARD`.
 
-```cpp
-AssetType AssetTypeFromScriptPubKey(const CScript& scriptPubKey) {
-    switch (ClassifyRigorTxout(scriptPubKey, sols)) {
-    case TxoutType::WITNESS_V0_KEYHASH:
-    case TxoutType::CONVERGE:
-        return ASSET_ORU;
-    case TxoutType::WITNESS_V1_RES:
-        return ASSET_RES;
-    case TxoutType::NULL_DATA:
-        return ASSET_NONE;
-    default:
-        return ASSET_INVALID;
-    }
-}
-```
+`ClassifyRigorTxout` also recognizes a `0xbb` template as `TxoutType::RES_MINT` and `AssetTypeFromScriptPubKey` returns `ASSET_RES` for that shape. Recognition is not acceptance. `CheckTransaction` rejects a non-coinbase output with that script (`bad-txns-res-mint-noncoinbase`). On mainnet a coinbase RES amount other than 0 is `bad-cb-res-amount`. `0xbb` is not a valid RES mint marker.
 
 Not creatable: P2PKH, P2SH, P2WSH, P2PK, bare multisig, Taproot, secp256k1
 CHECKSIG.

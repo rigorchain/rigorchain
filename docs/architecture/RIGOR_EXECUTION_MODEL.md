@@ -126,7 +126,7 @@ Not a ledger of record. Labels must follow
 `web/rigorchain-site` — `VITE_RPC_PROXY` + `VITE_EXPLORER_API`.
 
 Allowlist: `getblockchaininfo`, `getnetworkinfo`,
-`getconvergencestatus`, `getresmintstatus`.
+`getconvergencestatus`, `getblockconvergence`.
 
 ---
 

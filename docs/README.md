@@ -36,8 +36,8 @@ docs/
 | [`specification/`](./specification/) | Current SPEC layer |
 | [`whitepaper/`](./whitepaper/) | Public protocol papers |
 
-Historical documents are under [`../archive/`](../archive/). They are
-**not** protocol authority.
+Protocol authority is the live RFC and specification set linked below.
+There is no `archive/` tree in this repository.
 
 ## Start here
 

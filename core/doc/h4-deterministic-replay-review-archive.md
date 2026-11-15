@@ -11,7 +11,7 @@
 | `state_hash` + RPL2 alignment at sampled points | `feature_deterministic_replay.py`: every `CHECK_INTERVAL` blocks, `getdeterministicstatehash` + `getreplaysnapshot.serialized_snapshot` + `syncwithvalidationinterfacequeue` on all nodes before sample. |
 | 1000-block linear 3-node sync | Same harness: `TARGET_BLOCKS=1000`, star topology (B/C only peer A). |
 | NODE-B restart / NODE-C reindex | Phases 2–3: restart B, `-reindex-chainstate` on C; `state_hash` parity re-checked; deterministic log lines. |
-| Reorg / golden / restart | `feature_reorg_determinism_audit.py`: competing forks, GOLDEN-D, A restart, last N blocks `getconvergenceresult` projection + block digest trace. |
+| Reorg script named by this note | `core/test/functional/feature_reorg_determinism_audit.py` is not in this tree. `getconvergenceresult` is not a registered RPC. This row does not describe a command the node provides. |
 | Divergence capture | `feature_replay_failure_capture.py`: `capture_divergence`, `first_mismatch.json`, RPL2 hex, CSM/selection/mint JSON, `dumptxoutset`, `trace.tsv`; JSON `Decimal` → `str` for forensic dumps. |
 
 **H4 closure:** Core coverage for **modeled** linear replay, partition divergence forensics, and controlled reorg+golden paths is **sufficient** for the stated STEP objectives. Remaining items below are **engineering / CI / scope**, not consensus defects.

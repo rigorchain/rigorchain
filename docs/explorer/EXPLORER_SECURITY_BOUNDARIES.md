@@ -15,7 +15,7 @@ The explorer/indexer stack MUST NOT:
 | **F-02** | Use **wtxid** as primary identity for convergence, convergence lineage, or URLs |
 | **F-03** | Apply hidden indexing heuristics (probability inference, ML eligibility, fee guessing) |
 | **F-04** | Auto-generate replay assumptions not present in RPC/witness (invented `bind_hash`, wrong `target_prev` as T) |
-| **F-05** | Reimplement `RunSelection` / inequality as source of truth vs `getconvergenceresult` |
+| **F-05** | Reimplement the mint inequality as an explorer-local authority instead of displaying the node's accepted transactions |
 | **F-06** | Parse `rigor_target`, `res_draw_target`, or `bits` as RES inequality |
 | **F-07** | Call `invalidateblock` / `reconsiderblock` from API |
 | **F-08** | Hold spendable wallet keys on indexer host |
@@ -23,8 +23,8 @@ The explorer/indexer stack MUST NOT:
 | **F-10** | Merge ORU+RES into account balances |
 | **F-11** | Treat mempool as finalized RES mint |
 | **F-12** | Use Taproot/BIP341 verification or labeling |
-| **F-13** | Interpret pushes past PCORB index 5 as proof fields or extensions (A-7 removed the reserved slots; a trailing push is funding-input material such as the P2WSH redeem script) |
-| **F-14** | Serve stale convergence winners after reorg without truncate |
+| **F-13** | Treat P2WSH, P2PKH, or a Bitcoin Script redeem script as a spendable RIGOR output |
+| **F-14** | Keep a pre-reorg Convergence or RES display after the node tip has moved, without truncating and re-importing |
 
 ---
 
@@ -45,7 +45,7 @@ User trust:       MUST verify critical claims via own node RPC
 | Cache type | Allowed | Invalidation |
 |------------|---------|--------------|
 | Block body hex | Yes | Reorg truncate |
-| `getconvergenceresult` JSON | Yes | Reorg + re-fetch |
+| `getblock` / `getblockconvergence` snapshots | Yes | Reorg + re-fetch |
 | Derived lineage edges | Yes | Reorg truncate |
 | “Eligibility score” computed locally | **No** as authority | — |
 
@@ -77,8 +77,8 @@ User trust:       MUST verify critical claims via own node RPC
 | Event | Action |
 |-------|--------|
 | Root mismatch | Disable API; keep node running; file SEV-1 |
-| Suspected indexer bug | Compare `getconvergenceresult` CLI vs DB |
-| Chain split | Follow `CLOSED_TESTNET_MONITORING_PLAN` — do not pick fork in indexer |
+| Suspected indexer bug | Compare `getblock` and `getconvergencestatus` with the index |
+| Chain split | Follow the node tip. The indexer does not choose a fork |
 
 ---
 

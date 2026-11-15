@@ -47,8 +47,7 @@ Transport: HTTP POST `VITE_RPC_PROXY_URL` with JSON-RPC 2.0 body.
 | `getblockchaininfo` | All pages (status bar), `/explorer` Chain tab | **YES** | — |
 | `getnetworkinfo` | `/explorer` Chain, `/system-status` | **YES** | — |
 | `getconvergencestatus` | `/explorer` Convergence, status bar | **YES** | — |
-| `getconvergenceresult` | `/explorer` Convergence (block-scoped) | NO | **YES** — show partial if missing |
-| `getresmintstatus` | `/explorer` RES tab, status summary | NO | **YES** — optional soft fail |
+| `getblockconvergence` | `/explorer` Convergence (block-scoped cumulative destroy) | NO | **YES** — show the block's `0xbd` outputs from `getblock` if this call fails |
 
 **Forbidden RPC methods in public site client:**
 
@@ -128,7 +127,7 @@ Static content does not change when RPC is offline.
 |-------|-----------|
 | **OFFLINE** | `getblockchaininfo` unreachable OR RPC proxy unset |
 | **SYNCING** | RPC OK and `getblockchaininfo.initialblockdownload === true` |
-| **DEGRADED** | RPC OK but explorer down OR any required soft-fail active OR `getconvergenceresult` unavailable on convergence tab |
+| **DEGRADED** | RPC OK but explorer down, or `getblockconvergence` unavailable on the convergence tab |
 | **ONLINE** | RPC OK, not IBD (or IBD acknowledged in UI), explorer `/api/status` 200 |
 
 **Priority (highest wins for badge):** OFFLINE > SYNCING > DEGRADED > ONLINE
@@ -250,14 +249,15 @@ IF explorer.height !== rpc.blocks
 | UI field | Source |
 |----------|--------|
 | Status fields | RPC `getconvergencestatus` |
-| Result fields (\|F\|, root, sigma, winner) | RPC `getconvergenceresult` — **degraded** if absent |
+| Destroy cost, tip, cumulative RES, cumulative ORU destroyed | RPC `getconvergencestatus` |
+| Cumulative destroyed ORU through a block | RPC `getblockconvergence` |
 
 ### 8.4 Explorer — RES tab
 
 | UI field | Source |
 |----------|--------|
 | Mint list | Explorer `GET /api/res/mints` |
-| Mint status summary | RPC `getresmintstatus` (soft-fail) |
+| Tip mint cost | RPC `getconvergencestatus` (`destroy_cost`, `min_whole_res_burn`) |
 
 ### 8.5 Explorer — Block / Tx / Lineage
 

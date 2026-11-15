@@ -45,8 +45,7 @@ Operator deploys TLS-terminated reverse proxy (e.g. `https://rpc.rigorchain.com`
 | `getblockchaininfo` | All live pages | **YES** | — |
 | `getnetworkinfo` | `/network`, `/explorer` | **YES** | — |
 | `getconvergencestatus` | `/explorer`, header | **YES** | — |
-| `getconvergenceresult` | `/explorer` Convergence | NO | **YES** |
-| `getresmintstatus` | `/explorer` RES | NO | **YES** |
+| `getblockconvergence` | `/explorer` Convergence | NO | **YES** |
 
 ### Forbidden methods (client blocklist)
 
@@ -176,7 +175,7 @@ Static site on GitHub Pages does not run a backend; CORS must be configured on e
 |-----------|----------|--------|
 | RPC unreachable | `offline` or `degraded` | Red: rigord RPC unreachable |
 | Explorer unreachable | `degraded` | Amber: Explorer offline — RPC-only |
-| `getconvergenceresult` missing | Tab `degraded` | Amber per-field |
+| `getblockconvergence` missing | Tab `degraded` | Amber per-field |
 | `equivalence_claimed === true` | `degraded` + fault | Red: constitutional fault |
 | Partial JSON | `degraded` | Amber: incomplete node response |
 | Stale (`> 60s`) | show data + amber stale chip | — |

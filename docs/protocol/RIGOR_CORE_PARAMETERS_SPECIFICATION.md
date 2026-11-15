@@ -32,7 +32,7 @@ RIGOR monetary behavior is derived from the following protocol constants.
 
 | Parameter | Symbol | Value | Meaning |
 |---|---|---|---|
-| ORU block subsidy | S | 2⁷ | 128 ORU per block |
+| ORU block subsidy | S | 2⁷ | 0 ORU at height 0; 128 ORU at every height ≥ 1 |
 | Initial RES destruction cost | P₀ | 2¹⁰ | 1024 ORU per RES at initial scale |
 | Convergence scale parameter | H | 2²⁵ | Controls long-term RES cost growth |
 | Theoretical maximum RES supply | RESmax | 2²² | 4,194,304 RES |
@@ -156,13 +156,13 @@ Instead, issuance naturally approaches a finite mathematical limit.
 
 ## 4.1 RES Issuance Rate
 
-Each block creates:
+Each block at height ≥ 1 creates:
 
 $$
 2^7
 $$
 
-new ORU.
+new ORU. Height 0 creates none.
 
 At height $h$, the maximum theoretical RES creation supported by one block subsidy is:
 

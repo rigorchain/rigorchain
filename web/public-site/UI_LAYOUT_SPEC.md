@@ -157,8 +157,8 @@ Each panel:
 | Tab | Primary binding | Content |
 |-----|-----------------|---------|
 | **Chain** | RPC `getblockchaininfo`, `getnetworkinfo` | Height, tip hash, IBD flag, peers |
-| **Convergence** | RPC `getconvergencestatus`, `getconvergenceresult` (if available) | Status fields; degraded if partial |
-| **RES mints** | Explorer `GET /api/res/mints` | Mint list; RPC `getresmintstatus` sidebar |
+| **Convergence** | RPC `getconvergencestatus`, `getblockconvergence` | Destroy cost and cumulative destroyed ORU |
+| **RES mints** | Explorer `GET /api/res/mints` | Mint list. Tip cost from `getconvergencestatus` |
 | **Block** | Explorer `GET /api/block/:hash` | Block detail + convergence panel |
 | **Transaction** | Explorer `GET /api/tx/:id` | Tx + witness panels |
 | **Lineage** | Explorer `GET /api/lineage/:txid` | Graph view (read-only) |

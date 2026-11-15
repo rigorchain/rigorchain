@@ -139,8 +139,7 @@ blocks and issues ORU subsidy. PoW does not mint RES.
 Source: `rigor_kernel::GetRigorPowHash` in `core/src/rigor_kernel/pow_digest.h`;
 `CheckProofOfWork` in `core/src/pow.cpp`.
 
-The retired 64 KiB / 256-round mix in `pow_opus.cpp` is **not** OpuHash
-and is **not** the live `CheckProofOfWork` digest.
+`GetOpusHash` in `pow_opus.cpp` is not OpuHash. `CheckProofOfWork` does not call it.
 
 ---
 

@@ -1,189 +1,73 @@
-# Explorer RPC Compatibility Matrix
+# Explorer RPC compatibility
 
-**Document status:** Production documentation  
-**Baseline:** commit `4437597197aa713396a123673cc36606346ad523`, tag `mainnet-freeze-rfc014-2026-05-25`  
-**Source of truth:** `core/src/rpc/blockchain.cpp`, `core/src/rpc/rawtransaction.cpp`, `EXPLORER_RPC_STABILITY_MATRIX.md` (repo root).
+This page records two different facts, both read from source. No node was started, and no RPC was executed.
 
----
+1. The method is registered in the node source.
+2. `explorer/src/rpcCli.ts` actually calls it.
 
-## 1. Classification legend
+**STABLE** below means only the second fact: this explorer's CLI wrapper calls the method. A registered method that this explorer does not call is not marked STABLE. Parameter and result names below are the `RPCHelpMan` declarations. Runtime JSON was not captured.
 
-| Tier | Explorer may depend? | Change policy |
-|------|----------------------|---------------|
-| **STABLE** | Yes — indexer + public API | Breaking change requires ops RFC + version bump |
-| **INTERNAL** | Closed net diagnostics only | No product surface |
-| **UNSAFE** | No — grep CI must fail if referenced | Misleading or removed |
-| **FORBIDDEN** | Never call from indexer | Admin / chain mutation |
+Registration lists read for this page:
 
----
+- `core/src/rpc/blockchain.cpp` `RegisterBlockchainRPCCommands`
+- `core/src/rpc/mempool.cpp` `RegisterMempoolRPCCommands`
+- `core/src/rpc/rawtransaction.cpp` registration array
+- `core/src/rpc/mining.cpp` `submitblock`
+- `core/src/wallet/rpc/rpcwallet.cpp` wallet registration
+- `core/src/rpc/net.cpp` `getnetworkinfo`
 
-## 2. Tier definitions (explorer-specific)
+## Methods this explorer calls
 
-- **STABLE:** Field semantics frozen for testnet/mainnet integrators.  
-- **INTERNAL:** Determinism audits (`getdeterministicstatehash`, replay snapshots).  
-- **UNSAFE:** Retired names, wrong physics (`rigor_target`), or nonexistent methods.  
-- **FORBIDDEN:** Methods that alter chain view or bypass validation.
+| Method | Registration | What the source declares | Explorer call |
+|--------|--------------|--------------------------|---------------|
+| `getblockhash` | `blockchain.cpp` | height → block hash | `rpcCli.ts`, importer, startup |
+| `getblock` | `blockchain.cpp` | verbosity argument; result includes `cumulative_convergence` and `rigor_res_minted` | importer uses verbosity 1 and 2 |
+| `getrawtransaction` | `rawtransaction.cpp` | txid, optional verbose flag | importer calls verbose `true` |
+| `getblockchaininfo` | `blockchain.cpp` | chain summary; result includes `cumulative_convergence` | status, importer, compliance |
+| `getconvergencestatus` | `blockchain.cpp` | no arguments. Fields: `tip_height`, `confirm_height`, `issuance_authorized`, and, when authorized, `destroy_cost`, `min_atom_burn`, `min_whole_res_burn`, `destroy_cost_next`, `next_height`. Also `res_total`, `cumulative_convergence`, `last_res_height` | status and economics, with a catch that substitutes `{}` |
+| `getruntimesupply` | `blockchain.cpp` | tip supply witness | status and economics, same catch |
+| `getnetworkinfo` | `net.cpp` | local network summary | status and compliance |
+| `getrawmempool` | `mempool.cpp` | `verbose` defaults to false and then returns a transaction-id array | called with no arguments, so the default applies. This call does not request the verbose `convergence` object |
 
----
+`rigor_res_minted` is `CBlockIndex::has_res`. ConnectBlock sets it to 1 when the block's body RES mint amount is positive, and to 0 otherwise. The help text's phrase "convergence cycle" is the help string, not a second rule.
 
-## 3. Blockchain / indexing RPC
+`destroy_cost` is `ResDestroyCostAtHeight`. It is a display value. The mint rule remains the RFC-020 inequality.
 
-| Method | Tier | Indexer use |
-|--------|------|-------------|
-| `getblock` (verbosity 0–2) | **STABLE** | Block import, tx list |
-| `getblockheader` | **STABLE** | Light refresh |
-| `getblockhash` | **STABLE** | Height → hash |
-| `getbestblockhash` | **STABLE** | Tip watch |
-| `getrawtransaction` | **STABLE** | Tx detail (`txindex=1` required) |
-| `getblockchaininfo` | **STABLE** | Chain, cumulative convergence |
-| `getblockstats` | **STABLE** | Optional stats pages |
-| `gettxout` | **STABLE** | UTXO lookup (no wallet) |
-| `gettxoutsetinfo` | **STABLE** | Supply audit (heavy) |
-| `scantxoutset` | **STABLE** | Address scans (rate-limit) |
-| `getblockconvergence` | **STABLE** | CVGE cross-check |
-| **`getconvergenceresult`** | **STABLE** | **Primary draw audit** |
-| `getconvergencestatus` | **STABLE** | RES window / tip cadence |
-| `listconvergencehistory` | **STABLE** | RES mint block list |
-| `getassetbalance` | **STABLE** | Address ORU/RES scan |
-| `getmempoolinfo` | **STABLE** | Mempool cumulative convergence |
-| `getrawmempool` (verbose) | **STABLE** | Pending convergence object |
-| `getmempoolentry` | **STABLE** | Single mempool convergence |
-| `getconvergeinfo` | **UNSAFE** | Stub — height/hash only |
-| `getdeploymentinfo` | **UNSAFE** | REST-only drift |
-| `getdeterministicstatehash` | **INTERNAL** | Replay audits |
-| `getreplaysnapshot` | **INTERNAL** | Large binary |
-| `getchainstatesummary` | **INTERNAL** | Diff tooling |
-| `diffchainstatesummaries` | **INTERNAL** | |
-| `invalidateblock` | **FORBIDDEN** | Alters active chain |
-| `reconsiderblock` | **FORBIDDEN** | |
-| `submitblock` | **FORBIDDEN** | Miner-only |
-| `preciousblock` | **FORBIDDEN** | |
+## Registered, not called by this explorer
 
----
+These names are in a `CRPCCommand` table. This explorer's `RpcMethod` union does not include them. Do not describe them as explorer-supported.
 
-## 4. Required methods — expanded notes
+| Method | Registered in | Declared shape |
+|--------|---------------|----------------|
+| `getblockheader` | `blockchain.cpp` | block header |
+| `getbestblockhash` | `blockchain.cpp` | tip hash |
+| `getblockcount` | `blockchain.cpp` | height |
+| `getdifficulty` | `blockchain.cpp` | difficulty |
+| `gettxout` | `blockchain.cpp` | one UTXO |
+| `gettxoutsetinfo` | `blockchain.cpp` | UTXO statistics |
+| `getblockstats` | `blockchain.cpp` | block statistics |
+| `scantxoutset` | `blockchain.cpp` | descriptor scan |
+| `getblockconvergence` | `blockchain.cpp` | `hash`, `height`, `cumulative_convergence` |
+| `getassetbalance` | `blockchain.cpp` | `address`, `asset` (`ORU` or `RES`); scans the UTXO cursor |
+| `getdeterministicstatehash` | `blockchain.cpp` | `state_hash`, `height`, `best_block_hash`. The help text says the call walks the UTXO set under `cs_main` |
+| `getreplaysnapshot` | `blockchain.cpp` | snapshot object |
+| `getchainstatesummary` | `blockchain.cpp` | summary object |
+| `diffchainstatesummaries` | `blockchain.cpp` | comparison |
+| `listconvergencehistory` | `rawtransaction.cpp` | `start_height`, `end_height` |
+| `decoderawtransaction` | `rawtransaction.cpp` | hex in, decoded transaction out |
+| `decodescript` | `rawtransaction.cpp` | hex script in |
+| `getmempoolinfo` | `mempool.cpp` | includes optional `cumulative_convergence` |
+| `getmempoolentry` | `mempool.cpp` | one entry, including a `convergence` object |
+| `getdeploymentinfo` | `blockchain.cpp` | deployment object. This explorer does not call it |
 
-### 4.1 `getblock`
+Verbose `getrawmempool`, `getmempoolentry`, and the `convergence` object exist in `mempool.cpp`. Fields declared on that object are `is_convergence`, `convergence_amount`, `min_convergence`, `meets_min_convergence`, `descendant_feerate`, `eviction_score`, `policy`, and `priority`. This explorer does not request that object.
 
-| Field | Tier | Explorer rule |
-|-------|------|---------------|
-| `res_probability_target` | **STABLE** | Display; verify == shipping windowed hex `000000000055e63b88c230e77e7ee106959b5d3e1e9ea69ebac0b0b4be383479` (RFC-017 `E = 246`). Historical RFC-014 `00010000…00` (`2^240`) is not live. |
-| `draw_candidate_root` | **STABLE** | Link to convergence page |
-| `rigor_res_minted` | **STABLE** | RES badge |
-| `rigor_winner` | **STABLE** | Winner **txid** |
-| `cumulative_convergence` | **STABLE** | ORU cumulative convergence index |
-| `bits` | **STABLE** | PoW only — label “PoW target” |
-| `rigor_target` | **UNSAFE** | **Removed** — do not parse |
-| `res_draw_target` | **UNSAFE** | **Removed** |
-| `res_target_ctx` | **UNSAFE** | **Removed** |
+Wallet methods `createconvergence`, `sendres`, and `getbalances` are registered in `core/src/wallet/rpc/rpcwallet.cpp`. They are present when the wallet RPC table is registered. This explorer does not call them.
 
-### 4.2 `getrawtransaction`
+`createrawtransaction` and `signrawtransactionwithkey` are registered raw-transaction methods. `submitblock`, `preciousblock`, `invalidateblock`, and `reconsiderblock` are registered and change node state. This explorer does not call them.
 
-| Aspect | Tier | Rule |
-|--------|------|------|
-| `txid` | **STABLE** | Primary key |
-| `hash` (wtxid) | **STABLE** | Secondary display column |
-| `vin[].txinwitness` | **STABLE** | PCORB stack display |
-| `vout[].value` | **STABLE** | Asset inference via script |
+## Names that are not registered
 
-### 4.3 `gettxout`
+`getconvergenceresult`, `getconvergencedrawcandidates`, `getresmintstatus`, `getconvergeinfo`, and `createresclaim` do not appear in the registration arrays above. `feature_rigor_convergence_rpc_status_history.py` asserts that `getconvergeinfo` is absent from `help`.
 
-| Aspect | Tier | Rule |
-|--------|------|------|
-| `value`, `scriptPubKey` | **STABLE** | UTXO pages |
-| Asset label | Derived | From script — not an RPC field |
-
-### 4.4 `getconvergenceresult` (mandatory)
-
-| Field | Tier | Indexer column |
-|-------|------|----------------|
-| `hash`, `height` | **STABLE** | |
-| `bind_height`, `bind_blockhash`, `bind_hash` | **STABLE** | Replay binding |
-| `res_probability_target` | **STABLE** | Constant check |
-| `min_convergence` | **STABLE** | 1.00 ORU |
-| `convergence_root_set_size` | **STABLE** | \|F\| |
-| `draw_candidate_root_committed` | **STABLE** | Alert if ≠ computed |
-| `draw_candidate_root_computed` | **STABLE** | |
-| `draw_winner_txid` | **STABLE** | |
-| `candidates[].txid` | **STABLE** | **Not wtxid** |
-| `candidates[].h` | **STABLE** | |
-| `candidates[].draw_eligible` | **STABLE** | |
-| `candidates[].convergence_type` | **STABLE** | `v1_cvg2` \| `none` |
-
-### 4.5 `res_probability_target`
-
-| Surface | Tier | Semantics |
-|---------|------|-----------|
-| `getblock` / `getblockheader` | **STABLE** | Constitutional RHS = RFC-017 windowed `T` at `E = 246` (not Historical RFC-014 `2^240`) |
-| `getconvergenceresult` | **STABLE** | Same constant — **not** PoW |
-| `bits` / `target_prev` | **STABLE** (distinct) | PoW / replay bind — **never** RES inequality |
-
-### 4.6 Deprecated `rigor_target` paths
-
-| Name | Tier | Action |
-|------|------|--------|
-| `rigor_target` | **UNSAFE** | Remove from indexer code; CI grep |
-| `res_draw_target` | **UNSAFE** | Same |
-| `res_target_ctx` | **UNSAFE** | Same |
-| `getconvergencedrawcandidates` | **UNSAFE** | RPC does not exist — use `getconvergenceresult` |
-
----
-
-## 5. Raw transaction / decode RPC
-
-| Method | Tier | Notes |
-|--------|------|-------|
-| `decoderawtransaction` | **STABLE** | Offline decode |
-| `decodescript` | **STABLE** | |
-| `createrawtransaction` | **FORBIDDEN** on indexer | Write path |
-| `signrawtransactionwithkey` | **FORBIDDEN** | |
-
----
-
-## 6. Wallet RPC (indexer node: not loaded)
-
-| Method | Tier | Closed explorer |
-|--------|------|-----------------|
-| `createconvergence` | **STABLE** (wallet) | **FORBIDDEN** on NODE-C |
-| `createresclaim` | **REMOVED** — unregistered by SECURITY-001-A / A-7 with the RES script path | **N/A** — method does not exist |
-| `sendres` | **STABLE** (wallet) | **FORBIDDEN** on NODE-C |
-| `getbalances` | **STABLE** | **FORBIDDEN** on NODE-C |
-
-Wallet RPC remains **STABLE** for ecosystem wallets on NODE-A only.
-
----
-
-## 7. Mempool RPC
-
-| Method | Field | Tier |
-|--------|-------|------|
-| `getmempoolentry` | `convergence` | **STABLE** |
-| `getrawmempool` | nested `convergence` | **STABLE** |
-| `getmempoolinfo` | `cumulative_convergence` | **STABLE** |
-
-Mempool views are **non-final** — label “unconfirmed”; never treat as minted RES.
-
----
-
-## 8. CI / integrator grep gates
-
-```bash
-# MUST return no hits in explorer/indexer code:
-rg 'rigor_target|res_draw_target|res_target_ctx|getconvergencedrawcandidates' indexer/
-# MUST return hits only in docs/comments in core:
-rg 'getconvergenceresult|res_probability_target' indexer/
-```
-
----
-
-## 9. Document metadata
-
-| Field | Value |
-|-------|--------|
-| Risk classification | **LOW** (STABLE path); **HIGH** if retired fields parsed |
-| Explorer classification | **RPC-CONTRACT** |
-| Consensus impact | **NONE** |
-| Replay impact | **INDIRECT** — dropping bind fields breaks audit trails |
-| Determinism impact | **NONE** |
-| Indexing risk | **HIGH** if `rigor_target` or wtxid used |
-| Minimal safe recommendation | Whitelist STABLE table; forbid FORBIDDEN; grep UNSAFE names |
+`rigor_target`, `res_draw_target`, and `res_target_ctx` are not fields of `getblockconvergence` or `getconvergencestatus`.

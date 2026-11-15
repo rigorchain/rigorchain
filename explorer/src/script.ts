@@ -103,7 +103,14 @@ function isResMintScriptBytes(bytes: Buffer): boolean {
   return isCanonicalNonNegIntPush(bytes.subarray(0, pkhOp));
 }
 
-/** True iff scriptPubKey is a live coinbase `OP_RES_MINT` lock. */
+/**
+ * True when the bytes match the 0xbb template
+ * `<height> <20-byte> 0xbb`.
+ * Recognition is not consensus acceptance and is not RES issuance.
+ * A body output with this script is `bad-txns-res-mint-noncoinbase`.
+ * A RES amount below one atom is `bad-txns-res-output-nonpositive`.
+ * A nonzero mainnet coinbase RES amount is `bad-cb-res-amount`.
+ */
 export function isResMintScriptPubKey(scriptPubKeyHex: string): boolean {
   const hex = normalizeScriptHex(scriptPubKeyHex);
   if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]*$/.test(hex)) return false;
@@ -111,14 +118,33 @@ export function isResMintScriptPubKey(scriptPubKeyHex: string): boolean {
 }
 
 /**
- * Minimal deterministic scriptPubKey classification (must match C++ AssetTypeFromScriptPubKey):
+ * Script classification used by the indexer.
+ * Witness and Convergence rows follow `AssetTypeFromScriptPubKey`.
+ * The 0xbb row does not: the C++ classifier names it ASSET_RES, and this
+ * indexer refuses to store that name as a confirmed RES output.
  * - OP_CONVERGE (22-byte burn lock) => ORU
  * - v0/20 P2WPKH => ORU
  * - v1/32 native RES (not CVG2, not RES2) => RES
- * - canonical OP_RES_MINT => RES
+ * - canonical 0xbb template => INVALID (recognized pattern, not a RES output)
  * - OP_RETURN => NONE
  * - anything else, including v0/32, CVG2, RES2, unknown => INVALID
+ *
+ * C++ `AssetTypeFromScriptPubKey` still names the 0xbb template ASSET_RES.
+ * This function does not. Indexing a recognized template as RES would store
+ * a consensus-rejected output as confirmed RES. The indexer sees script
+ * bytes only; it does not receive a separate acceptance bit, so the
+ * conservative kind is INVALID for both coinbase and body outputs.
  */
+export function indexedOutputAtoms(assetKind: AssetKind, atoms: bigint): bigint {
+  if ((assetKind === "ORU" || assetKind === "RES") && atoms > 0n) return atoms;
+  return 0n;
+}
+
+/** Confirmed RES balance and supply count only a positive RES-kind output. */
+export function countsTowardConfirmedRes(assetKind: AssetKind, atoms: bigint): boolean {
+  return assetKind === "RES" && atoms > 0n;
+}
+
 export function classifyScriptPubKey(scriptPubKeyHex: string, bech32Hrp: string): ScriptClassification {
   const hex = normalizeScriptHex(scriptPubKeyHex);
   const invalid: ScriptClassification = {
@@ -163,13 +189,14 @@ export function classifyScriptPubKey(scriptPubKeyHex: string, bech32Hrp: string)
   if (isResMintScriptBytes(bytes)) {
     const pkh = bytes.subarray(bytes.length - 21, bytes.length - 1);
     return {
-      assetKind: "RES",
+      assetKind: "INVALID",
       witnessVersion: null,
       programHex: Buffer.from(pkh).toString("hex"),
       address: null,
       isConvergence: false,
-      scriptName: "OP_RES_MINT",
-      scriptState: null,
+      scriptName: "recognized 0xbb template",
+      scriptState:
+        "Recognized byte pattern only. Not an accepted RES output, and not counted in confirmed RES balance or supply.",
     };
   }
 

@@ -172,18 +172,18 @@ them, so the derivation of the cap follows directly from the exponent
 relationships:
 
 ```
-RES_MAX_SUPPLY = Σ_{h≥0} S / destroy_cost(h)
+RES_MAX_SUPPLY = ∫_0^∞ S / destroy_cost(h) dh
                = (S / P0) · H
                = 2⁷ / 2¹⁰ · 2²⁵
                = 2²²
                = 4 194 304 RES
 ```
 
-`S = 128`, `P0 = 1024`, `H = 2²⁵ = 33 554 432` blocks (about 638 years).
-The exponent being exactly 2 is what makes the integral exactly
-`(S / P0) · H` with no residual, and therefore what makes the cap land
-*on* a power of two rather than near one. Edit any one constant and a
-visible identity breaks, rather than a curve quietly shifting.
+`S = 128`, `P0 = 1024`, `H = 2²⁵ = 33 554 432` blocks (about 638 years at
+600-second blocks). The exponent 2 makes that integral equal `(S / P0) · H`.
+The discrete sum is not that integral. Height 0 creates no ORU, and the
+integer mint rule admits only `floor((B << 40) / (2²⁵ + h)²)`. The constant
+is an upper bound on that schedule. It is not an amount the chain can mint.
 
 `RES_DESTROY_SHIFT = 40` is not chosen independently. It is the
 integer consensus scaling factor (`B << 40`), forced by cancelling
@@ -198,34 +198,18 @@ R · (2²⁵ + h)²         ≤  B · 2⁴⁰
 so `40 = 50 − log₂(1024)`. A different genesis cost moves the scaling
 factor and nothing else. `2⁵⁰` remains the display-curve denominator.
 
-**Why this is an upper bound, and why it needs no consensus
-enforcement.** ORU cannot be destroyed before it exists, so destroy
-through any height cannot exceed emission through that height.
-`destroy_cost` is strictly increasing, so `1 / destroy_cost` is strictly
-decreasing. The standard exchange argument says the sum is maximised by
-destroying every ORU at the height it appears. That schedule is exactly
-the closed-form integral above. Delaying a destroy can only ever yield
-less RES. No hoarding strategy reaches the bound from above. Block
-validation does not consult a running counter.
+ORU cannot be destroyed before it exists. `destroy_cost` is strictly
+increasing, so destroying a subsidy later admits less RES than destroying
+it at the height it is created. That schedule starts at height 1, because
+height 0 creates no ORU. Its real-valued sum is strictly below the integral,
+and the integer floors are lower still. Block validation does not consult a
+running RES counter.
 
-Cumulative issuance through any height also has a closed form:
-
-```
-cumulative(h) = RES_MAX_SUPPLY · h / (h + 2²⁵)
-```
-
-The operational meaning of the pole `h = 2²⁵` is that, at `ρ = 100%`,
-the median of the issuance distribution sits at year 638. Cumulative RES
-is then half the cap, and destroy cost is about 4 096 ORU per RES.
-
-Realised stock equals participation times the ceiling, exactly:
-
-| ρ | Realised issuance | Utilisation |
-|--:|------------------:|------------:|
-| 5% | 209 715 RES | 5.0% |
-| 20% | 838 861 RES | 20.0% |
-| 50% | 2 097 152 RES | 50.0% |
-| 100% | 4 194 304 RES | 100.0% |
+The node helper `ResCumulativeMaxAtHeight(h)` returns
+`floor(RES_MAX_SUPPLY · h / (h + 2²⁵))` for `h > 0`. At `h = 2²⁵` that helper
+equals half the constant, and the displayed destroy cost is 4 096 ORU per
+RES. The helper is not the sum of the per-block floors, and a fraction `ρ`
+of emitted ORU does not mint `ρ` times the constant.
 
 Minting ends when a whole block’s subsidy no longer buys a single RES
 atom. Integer arithmetic decides the height: `118 599 277 598` (about
@@ -236,8 +220,9 @@ parameter.
 
 ## 2.5 The schedule is an upper bound, not a calendar promise
 
-The table below is the `ρ = 100%` ceiling. Numbers are printed by the
-RFC-020 numeric SSOT. None was computed by hand.
+The table below is `ResDestroyCostAtHeight` and `ResCumulativeMaxAtHeight`,
+with cumulative RES rounded to a whole RES. Cumulative ORU is `height · 128`.
+These columns are not the sum of the per-block integer mint maxima.
 
 | Year | Height | ORU / RES | Cumulative ORU | Cumulative RES | % of cap |
 |-----:|-------:|----------:|---------------:|---------------:|---------:|
@@ -254,7 +239,8 @@ RFC-020 numeric SSOT. None was computed by hand.
 | 1 000 | 52 594 920 | 6 750.01 | 6 732 149 760 | 2 560 659 | 61.05% |
 | 2 000 | 105 189 840 | 17 507.75 | 13 464 299 520 | 3 179 938 | 75.82% |
 
-Even at full participation, year 1 issues about 6 564 RES. In early
+The helper at the year-1 height rounds to 6 564 RES. That figure is not a
+count of RES the chain has minted. In early
 markets with limited liquidity, secondary price discovery may be
 influenced by the protocol mint requirement — the intended transmission
 of RES demand into ORU destroy. A market too thin to discover any ratio

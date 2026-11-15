@@ -53,9 +53,9 @@ anything under `core/src/consensus/` needs more than a pull request:
 5. **The Coq development still builds** and stays axiom-free. If the change touches
    something the model covers, update the model.
 
-Note that the Coq development and the C++ node are not mechanically connected — see
-[docs/verification/FORMAL-VERIFICATION-VERDICT.md](docs/verification/FORMAL-VERIFICATION-VERDICT.md) §3. Keeping them
-in agreement is a manual obligation that falls on whoever changes either side.
+The Coq development and the C++ node are not mechanically connected.
+`equivalence_claimed` and `refinement_proved` stay false. See
+[docs/verification/FORMAL-VERIFICATION-STATUS.md](docs/verification/FORMAL-VERIFICATION-STATUS.md).
 
 Workflow
 --------

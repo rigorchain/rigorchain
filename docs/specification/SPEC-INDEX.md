@@ -6,8 +6,7 @@
 proofs MUST reference documents listed here.
 
 > **Parameter boundary.** Live issuance is RFC-020 (`docs/protocol/RFC-020.md`).
-> RFC-014 / RFC-015 / RFC-019 numbers are historical and not active consensus
-> parameters. Those earlier RFC texts are not protocol authority.
+> RFC-014, RFC-015, and RFC-019 are not the issuance parameters of this node.
 
 ---
 
@@ -43,15 +42,15 @@ Specification  →  Formal Model  →  Proof  →  Runtime Alignment Evidence
 | **SPEC-005** | [Consensus Invariants](./SPEC-005-CONSENSUS-INVARIANTS.md) | **ESTABLISHED** | CI-CONSENSUS/STATE/ECONOMIC/DRAW/FREEZE invariants, dependency graph, FVR boundary, SI→CI mapping, freeze compatibility |
 | **SPEC-006** | [Runtime / Formal Mapping](./SPEC-006-RUNTIME-FORMAL-MAPPING.md) | **ESTABLISHED** | Spec→formal→Coq→witness mappings, MP principles, CI/CO/TA/FVR tables, equivalence boundary, verification hierarchy |
 | **SPEC-007** | [Equivalence Boundaries](./SPEC-007-EQUIVALENCE-BOUNDARIES.md) | **ESTABLISHED** | CES/ECS layers, FVR-I..N closure boundaries, draw impossibility, PD-4F debt, future scoped equivalence conditions |
-| **SPEC-008** | [Proof-of-Work (SHA3-256)](./SPEC-008-PROOF-OF-WORK.md) | **CURRENT PRODUCTION** | Node `CheckProofOfWork` is SHA3-256(`RGRPOW01` \|\| header_80). OpuHash is historical. SHA256d retained for block id, merkle, txid, and σ. |
+| **SPEC-008** | [Proof-of-Work (SHA3-256)](./SPEC-008-PROOF-OF-WORK.md) | **CURRENT PRODUCTION** | OpuHash is FIPS SHA3-256(`"RGRPOW01" \|\| header_80`). SHA256d is the block id, merkle root, and txid. |
 
 ---
 
-## Historical design notes
+## Proof of work
 
 SPEC-008 records the live Proof-of-Work digest. Production `core/src/pow.cpp`
-implements it. The retired 64 KiB mix in `pow_opus.cpp` is not the live
-work function.
+implements it through `GetRigorPowHash`. `GetOpusHash` in `pow_opus.cpp` is
+not that function.
 
 ---
 

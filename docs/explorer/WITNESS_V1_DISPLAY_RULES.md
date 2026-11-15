@@ -24,8 +24,6 @@ rules. No production
 CVG2 migration is required. Historical CVG2 conversion is not a consensus
 concern.
 
-Policy: [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATION_NOTES.md).
-
 “Script path” is retired vocabulary for RES: SECURITY-001-A / A-7 left a witness v1 RES output with
 exactly one spending path, the Ed25519 key path. The PCORB proof is not a RES spend path at all — it
 rides on the **ORU** funding input of a body mint transaction.

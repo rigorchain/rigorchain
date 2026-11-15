@@ -10,5 +10,3 @@ Still active in this folder:
 | [`RIGOR_ARCHITECTURE_PAPER.md`](./RIGOR_ARCHITECTURE_PAPER.md) | Architecture paper v1.1 (narrative; not consensus SSOT) |
 | [`RIGOR_EXECUTION_MODEL.md`](./RIGOR_EXECUTION_MODEL.md) | ConnectBlock / runtime boundary |
 | [`RIGOR_DETERMINISM_MAP.md`](./RIGOR_DETERMINISM_MAP.md) | Determinism map |
-
-Historical architecture reports: [`../../archive/deprecated/architecture/`](../../archive/deprecated/architecture/).

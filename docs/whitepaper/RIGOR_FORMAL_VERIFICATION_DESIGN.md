@@ -2,21 +2,20 @@
 
 **Document status:** Design specification (not the live claim SSOT)  
 **Date:** 2026-09-14  
-**Aligned to:** formal governance freeze (`MATURITY_LEVEL=4.9`)
+**Aligned to:** RFC-020 issuance and the C++ node. A model inventory label is not a proof of that node.
 
 This paper states security assumptions, verification **targets**, and
 implementation limitations. Formal results are properties of the Coq
 consensus-kernel **model**, not a C++ equivalence proof.
 
-Live claim status (single source of truth):
-[`../../audit/formal_bridge/FORMAL_STATUS_SOURCE_OF_TRUTH_v1.md`](../../audit/formal_bridge/FORMAL_STATUS_SOURCE_OF_TRUTH_v1.md).
+Live claim status:
+[`../verification/FORMAL-VERIFICATION-STATUS.md`](../verification/FORMAL-VERIFICATION-STATUS.md).
 Classified theorems:
 [`../../formal_verification/rigor_kernel/release/FinalProofInventory.md`](../../formal_verification/rigor_kernel/release/FinalProofInventory.md).
 Public narrative:
 [`chapters/08-formal-boundary.md`](./chapters/08-formal-boundary.md).
 
 ```
-MATURITY_LEVEL=4.9
 REFINEMENT_PROVED=false
 CPP_KERNELINPUT_EQUIVALENCE=false
 LEVEL_5_CLAIMED=false
@@ -360,9 +359,7 @@ Verification goals:
 - no lottery / `p_draw` / `W(k)` as shipping issuance
 - identical inputs produce identical result
 
-Coinbase `OP_RES_MINT` is not the RFC-019 path. The lottery cone is
-archived `HISTORICAL_ONLY`; it is not a live verification target for
-issuance.
+Coinbase `0xbb` does not create RES. A body transaction with that script is rejected. A draw is not the issuance rule.
 
 **Status:** **MODEL_PROVED** as the current kernel issuance identity
 (no lottery in the shipping model). **NOT C++** inhabit of
@@ -505,13 +502,13 @@ It is not a certificate that the production binary matches the model.
 
 | Document | Purpose |
 |----------|---------|
-| [`../../audit/formal_bridge/FORMAL_STATUS_SOURCE_OF_TRUTH_v1.md`](../../audit/formal_bridge/FORMAL_STATUS_SOURCE_OF_TRUTH_v1.md) | **Live claims and flags** (4.9) |
-| [`../../formal_verification/rigor_kernel/release/FinalProofInventory.md`](../../formal_verification/rigor_kernel/release/FinalProofInventory.md) | Classified theorems; only emitter of `MATURITY_LEVEL=` |
+| [`../verification/FORMAL-VERIFICATION-STATUS.md`](../verification/FORMAL-VERIFICATION-STATUS.md) | Production rules and the claim flags |
+| [`../../formal_verification/rigor_kernel/release/FinalProofInventory.md`](../../formal_verification/rigor_kernel/release/FinalProofInventory.md) | Classified theorem list emitted by the kernel generator |
 | [`chapters/08-formal-boundary.md`](./chapters/08-formal-boundary.md) | Public narrative of the boundary |
 | [`RIGOR_PROTOCOL_IDENTITY.md`](./RIGOR_PROTOCOL_IDENTITY.md) | Project identity — what RIGOR is |
 | [`RIGOR_MATHEMATICAL_CONSENSUS_DESIGN.md`](./RIGOR_MATHEMATICAL_CONSENSUS_DESIGN.md) | Mathematical extraction — equations and consensus functions |
 | [`../architecture/RIGOR_EXECUTION_MODEL.md`](../architecture/RIGOR_EXECUTION_MODEL.md) | Runtime and execution boundaries |
-| [`../verification/FORMAL-VERIFICATION-VERDICT.md`](../verification/FORMAL-VERIFICATION-VERDICT.md) | Historical L2 verdict; **does not** override the kernel inventory |
+| [`../formal/VerificationStatus.md`](../formal/VerificationStatus.md) | Public flags. A model proof is not a proof of the node |
 | [`../explorer/EXPLORER_ARCHITECTURE.md`](../explorer/EXPLORER_ARCHITECTURE.md) | Explorer implementation — observation, not consensus |
 
 Explorer remains an independent product. Formal verification does not

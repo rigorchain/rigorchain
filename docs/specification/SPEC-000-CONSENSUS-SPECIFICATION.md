@@ -100,7 +100,7 @@ Source: `rigor_kernel::GetRigorPowHash`, `CheckProofOfWork`.
 - Genesis is PoW-exempt after a valid `nBits`
 - ASERT (aserti3-2d): spacing 600 s; mainnet half-life **43200 s**;
   anchor height 1; per-block clamp ±12.5%
-- The retired 64 KiB mix in `pow_opus.cpp` is not OpuHash
+- `GetOpusHash` in `pow_opus.cpp` is not OpuHash. `CheckProofOfWork` does not call it
 - The mint price is not `nBits`
 
 ### 1.5 Dual-asset model

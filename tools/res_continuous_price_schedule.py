@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Authoritative integer model of the continuous RES destroy cost (RFC-020).
+"""Integer model of the continuous RES destroy-cost inequality (RFC-020).
 
-Every number in RFC-020 comes from this file. Nothing here decides consensus;
-it mirrors, in Python ints, the exact operations the C++ header performs, so the
-two can be compared bit for bit.
+This file does not decide consensus and it does not report chain issuance.
+`cumulative_res_at` is `floor(RES_MAX_SUPPLY * h / (h + 2^25))`, the integer
+antiderivative, not the sum of per-block floors and not a balance the node
+has validated. `rho * RES_MAX_SUPPLY` is that constant scaled by a fraction.
+It is not realised issuance and not an on-chain total.
+
+The predicate check uses Python ints for the same multiply-and-shift the C++
+header uses: `R * (2^25 + h)^2 <= B << 40`.
 
 The whole of RFC-020 reduces to one predicate,
 
-    020|    R * (2^25 + h)^2 <= B << 40
+    R * (2^25 + h)^2 <= B << 40
 
 with no division, no floor and no square root anywhere in it. This script
-derives that predicate from the destroy cost it encodes, proves the algebra is an
-identity rather than an approximation, and prints every table in the RFC.
+derives that predicate from the destroy cost it encodes and checks that the
+algebra is an identity. The printed tables are this model. They are not a
+dump of validated chain supply.
 
     python3 tools/res_continuous_price_schedule.py             human-readable report
     python3 tools/res_continuous_price_schedule.py --json      machine-readable
@@ -325,18 +331,19 @@ def report():
     print("Natural terminus (no horizon constant exists)")
     print(f"  height {terminus:,} = year {terminus/BLOCKS_PER_YEAR:,.0f}")
     print()
-    print("Schedule")
+    print("Schedule (helper column is floor(cap * h / (h + 2^25)), not chain supply)")
     hdr = (f"  {'year':>6} {'height':>14} {'ORU/RES':>13} {'cum ORU':>18} "
-           f"{'cum RES':>13} {'% of cap':>9} {'min burn':>10}")
+           f"{'helper RES':>13} {'% helper':>9} {'min burn':>10}")
     print(hdr)
     for row in schedule_rows():
         print(f"  {row['year']:>6} {row['height']:>14,} {row['destroy_cost_oru']:>13,.2f} "
               f"{row['cumulative_oru']:>18,} {row['cumulative_res']:>13,.2f} "
               f"{row['share_of_cap']:>8.2%} {row['min_burn_atoms']:>10,}")
     print()
-    print("Participation identity: realised issuance = rho * RES_MAX_SUPPLY")
+    print("rho times the integral constant RES_MAX_SUPPLY")
+    print("  This product is not chain issuance and not the sum of per-block floors.")
     for rho in (0.05, 0.20, 0.50, 1.00):
-        print(f"  rho = {rho:>5.0%}   {rho * cap / RES_COIN:>14,.0f} RES")
+        print(f"  rho = {rho:>5.0%}   {rho * cap / RES_COIN:>14,.1f} RES  (constant x rho)")
     print()
     print("Wallet destroy-cost margin (replaces the RFC-019 epoch-boundary hack)")
     for margin in (100, 1_000, 10_000, 100_000):
@@ -356,10 +363,10 @@ def markdown():
               f"{row['cumulative_oru']:,} | {row['cumulative_res']:,.0f} | "
               f"{row['share_of_cap']:.2%} |")
     print()
-    print("| rho | Realised issuance | Utilisation |")
-    print("|----:|------------------:|------------:|")
+    print("| rho | rho times RES_MAX_SUPPLY (not chain issuance) |")
+    print("|----:|-----------------------------------------------:|")
     for rho in (0.05, 0.20, 0.50, 1.00):
-        print(f"| {rho:.0%} | {rho * cap / RES_COIN:,.0f} RES | {rho:.1%} |")
+        print(f"| {rho:.0%} | {rho * cap / RES_COIN:,.1f} RES |")
 
 
 def as_json():

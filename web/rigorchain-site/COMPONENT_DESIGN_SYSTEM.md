@@ -144,7 +144,7 @@ Props: `variant`, `live?: { height?, hash? }`, `status?: 'live'|'static'|'degrad
 | Section | Data |
 |---------|------|
 | Mint list table | `GET /api/res/mints` |
-| Status sidebar | `getresmintstatus` (soft-fail) |
+| Status sidebar | `getconvergencestatus` |
 | Lifecycle diagram | Static: eligibility → mint tx → RES UTXO |
 
 **Rules:** Empty list = empty state message, not demo rows.

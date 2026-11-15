@@ -14,8 +14,14 @@
  * not dispatched by a VM. Numeric values are frozen (byte compatibility
  * space). Consensus spend paths never switch on these identifiers.
  *
- * Live markers: 0x6a (RETURN), 0xbb (RES mint), 0xbd (CONVERGE).
- * 0xbc is burned. 0xbe–0xfe and 0xff are invalid (fail closed).
+ * Markers used by accepted outputs: 0x6a (RETURN) and 0xbd (CONVERGE).
+ * 0xbb is still classified as a mint-shaped script (RES_MINT_MARKER /
+ * ASSET_RES). Classification is not acceptance and does not create RES.
+ * CheckTransaction rejects a non-coinbase output with that script
+ * (bad-txns-res-mint-noncoinbase) and rejects a RES output below one
+ * atomic unit (bad-txns-res-output-nonpositive). On mainnet a coinbase
+ * RES amount other than zero is rejected when the block is connected
+ * (bad-cb-res-amount). 0xbc is burned. 0xbe–0xfe and 0xff fail closed.
  */
 
 enum class RigorByteClass {

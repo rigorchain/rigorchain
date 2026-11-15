@@ -50,13 +50,9 @@ strengthen that language.
 
 ## Formal verification
 
-See `docs/verification/FORMAL-VERIFICATION-VERDICT.md` for what the Coq
-model proves. The model is not a claim that every runtime binary is
-identical to the proof.
+See `docs/verification/FORMAL-VERIFICATION-STATUS.md`. The Coq sources are not a claim that the node binary matches a model.
 
-Live targets: `destroy_cost(h)` integer schedule, `CheckResMintArithmetic`,
-closed-form cap `419430400000000`, UTXO / ORU conservation. Lottery-cone
-lemmas stay in archive (Category C).
+Production issuance is `CheckResMintArithmetic`. The cap constant is `419430400000000` atoms. A model lemma about a draw or a winner is not that rule.
 
 ---
 

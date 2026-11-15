@@ -43,6 +43,5 @@ Chapters bound into the paper:
 Implementation facts: [`../developer/CODE_SSOT_PROTOCOL_FACTS.md`](../developer/CODE_SSOT_PROTOCOL_FACTS.md).
 Opcode spec: [`../specification/RIGOR_OPCODE_SPECIFICATION.md`](../specification/RIGOR_OPCODE_SPECIFICATION.md).
 
-RFC-019 and earlier texts are not protocol authority.
-AlphaPlus drafts and the retired 64 KiB mix notes: [`../../archive/`](../../archive/).
-Live PoW name is **OpuHash** = SHA3-256(`"RGRPOW01" || header_80`).
+RFC-019 is not the production issuance rule.
+Live PoW name is **OpuHash** = FIPS SHA3-256(`"RGRPOW01" || header_80`). `CheckProofOfWork` calls `GetRigorPowHash`. It does not call `GetOpusHash`.

@@ -41,7 +41,7 @@ A transaction is indexed as **RES mint** when ALL hold:
 
 - Infer mint from probability heuristics, draw winners, or `W(k)`.
 - Mark mint from mempool alone.
-- Treat coinbase `0xbb` as the issuance path.
+- Treat coinbase or body `0xbb` as an accepted RES output. `classifyScriptPubKey` still recognizes the template, then returns asset kind INVALID. C++ `AssetTypeFromScriptPubKey` names the same bytes ASSET_RES; that name is classification, not acceptance. A body transaction is `bad-txns-res-mint-noncoinbase`, a RES output below one atom is `bad-txns-res-output-nonpositive`, and a nonzero mainnet coinbase RES amount is `bad-cb-res-amount`. The indexer does not receive a separate acceptance bit, so it does not store the pattern as confirmed RES balance or supply.
 - Treat a body-tx PCORB witness as issuance.
 
 ### 3.1 Mint amount
@@ -74,9 +74,7 @@ classifications. Public network launch will rebuild the explorer view and
 indexed observations from genesis using current consensus classification
 rules. No production
 CVG2 migration is required. Historical CVG2 conversion is not a consensus
-concern. `OP_CONVERGE` is the only live Convergence classification.
-
-Policy: [`../archive/migration/MIGRATION_NOTES.md`](../archive/migration/MIGRATION_NOTES.md).
+concern. The live Convergence output is the 22-byte `0xbd` script.
 
 ---
 
@@ -105,8 +103,8 @@ Accept  ⇔  R = 0  ∨  R · (2²⁵+H)² ≤ B << 40
 
 | Event | Detection |
 |-------|-----------|
-| Convergence tx | `convergence_type == v1_cvg2` in `getconvergenceresult` OR `IsConvergenceTx` equivalent via decode |
-| Amount | `convergence_amount` on candidate row (convergence fee) |
+| Convergence tx | Decode: exactly one positive `0xbd` output |
+| Amount | That output's ORU value `B` |
 
 ### 6.2 Convergence lineage index
 

@@ -3,7 +3,7 @@
 **See also** [`PROTOCOL-NAMING-TRUTH-SOURCE.md`](./PROTOCOL-NAMING-TRUTH-SOURCE.md).
 `src/` is the source of truth.
 
-RFC-019: a convergence output **burns ORU**. The same body transaction MAY mint
+RFC-020: a convergence output destroys ORU. The same body transaction may mint
 Witness v1 RES when `CheckResMintArithmetic` holds. There is no draw, no
 candidate window, no winner, and no coinbase RES mint.
 

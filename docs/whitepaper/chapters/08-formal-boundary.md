@@ -156,8 +156,7 @@ stay false until a refinement proof rewrites them.
   running chain is a formally verified chain.
 
 Living correspondence:
-`docs/verification/FORMAL-VERIFICATION-VERDICT.md` (what the model
-proves). Reproduce from a full node against the published rules.
+`docs/verification/FORMAL-VERIFICATION-STATUS.md`. Reproduce issuance and proof-of-work from the node against RFC-020 and SPEC-008.
 Engineering frontier:
 `formal_verification/rigor_kernel/release/FormalizationFrontier.md`.
 Classified inventory:

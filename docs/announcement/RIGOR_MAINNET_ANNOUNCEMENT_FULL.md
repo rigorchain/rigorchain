@@ -155,14 +155,14 @@ There is no per-block mint cap, no minting horizon, and mint outputs carry 100-c
 
 ## 6. Where 4,194,304 RES comes from
 
-The RES ceiling is `RES_MAX_SUPPLY = 419,430,400,000,000` atoms = **4,194,304 RES = 2^22**. This number is not a chosen supply cap. It is the closed-form integral of the per-block mint ceiling, and it is the product of three protocol parameters:
+The RES ceiling is `RES_MAX_SUPPLY = 419,430,400,000,000` atoms = **4,194,304 RES = 2^22**. This number is the integral of the real-valued per-block ceiling. It is an upper bound. It is not the sum of the integer per-block mint maxima, and it is not an amount the chain can mint.
 
 ```
 S  = 2^7  = 128 ORU        block subsidy
 P0 = 2^10 = 1024 ORU       destroy cost for 1 RES at height 0
 H  = 2^25                  hardening timescale (blocks)
 
-Σ_{h≥0} S / destroy_cost(h)  =  (S / P0) · H  =  2^7 / 2^10 · 2^25  =  2^22
+∫_0^∞ S / destroy_cost(h) dh  =  (S / P0) · H  =  2^7 / 2^10 · 2^25  =  2^22
 ```
 
 Because the exponent in `destroy_cost(h)` is exactly 2, the integral closes with no residual term, which is why the bound lands *on* a power of two. The same relationship forces the consensus shift: `40 = 50 − log2(1024)`. Change the genesis destroy cost and the shift moves with it; the three constants cannot be edited independently without breaking a visible identity that is asserted at compile time in the released code.

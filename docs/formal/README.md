@@ -22,6 +22,5 @@ LEVEL_5_CLAIMED = false
 CPP_VERIFIED = false
 ```
 
-P0 kernel reports and old L2 notes are in
-[`../../archive/formal_history/`](../../archive/formal_history/).
-They are not normative.
+This directory does not contain a separate historical-report tree.
+The claim flags in [`VerificationStatus.md`](./VerificationStatus.md) are the public boundary.

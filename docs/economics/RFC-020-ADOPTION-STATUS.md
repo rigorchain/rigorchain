@@ -153,7 +153,7 @@ says the calendar bucket is a mint horizon.
 
 **Landed this snapshot-banner tranche:** files that still said
 “Live RES issuance is RFC-019” now open with an RFC-020 shipping
-notice. `tools/res_issuance_schedule.py` is labelled historical.
+notice. `tools/res_issuance_schedule.py` computes an epoch table and a 125 ORU tail. That file is not `GetBlockSubsidy`.
 
 **Landed this body-rewrite tranche:** CODE_SSOT, economic validation,
 monetary-policy exec, SPEC-000/001/005/006 live mint/cap rows,
@@ -170,13 +170,11 @@ match `tools/res_continuous_price_schedule.py`. Twelve issuance golden
 JSONs were regenerated from that SSOT. `refinement_proved` stays **false**.
 
 **Landed this economic-sim tranche:** `tools/economic_model_simulator.py`
-and `formal_verification/economic_supply_model.json` are RFC-020 (flat
-128 ORU, continuous `destroy_cost(h)`, `minted_res_supply = 0` on the no-destroy
-baseline). P0-076 validation + attack-surface notes were rewritten, not
-bannered. Lottery Coq under `formal_verification/archive/lottery/` is
-kept (CI + retired proofs; no draw to rewrite). RFC-017 / PHASE-4D/4E
-issuance audits were moved to `archive/p0-history/docs/formal/`.
-`refinement_proved` stays **false**.
+and `formal_verification/economic_supply_model.json` are described here as
+RFC-020 (flat 128 ORU, continuous `destroy_cost(h)`). This tree does not
+contain `formal_verification/archive/lottery/` or
+`archive/p0-history/docs/formal/`. Production issuance is the predicate in
+`core/src/consensus/res_issuance.h`. `refinement_proved` stays **false**.
 
 **Landed this mining-architecture tranche (2026-09-14):** the production
 mining path is RFC-020 ORU-only GBT copy-bytes. The node assembler

@@ -49,9 +49,9 @@ Status labels:
 | `spec/rigor_consensus_spec.py` `asset_from_script` | matches classifier | No `SignatureHash` / Ed25519 domain |
 | C++ `rigor_sighash_p0_018.json` | tagged preimage + chain_id gold | Not replayed inside Coq |
 
-## LIVE_OTHER (do not archive, not spend proofs)
+## Not the production mint rule
 
-Draw / σ / Convergence_Root / WindowExclusion / ResSchedule / SHA-256d kernel / dual-pool conservation / fee-burn accounting / golden harness. These are independent of EvalScript and remain the monetary + draw cone.
+Draw, σ, a winner function, and a convergence-root selection digest are not RFC-020. Production minting is `CheckResMintArithmetic` in the C++ node. A Coq file that still states a draw is a statement about that file. It is not a proof of the node. SHA-256d in a Coq hasher is not the production proof-of-work digest. Production proof-of-work is FIPS SHA3-256(`"RGRPOW01" || header_80`).
 
 ## MISSING in the old cone (now `rigor_v01/`)
 

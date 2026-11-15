@@ -104,9 +104,8 @@ representation:
 - **25** sits at the end
 
 The decimal word “125” displays its own divisor structure. That is a rare
-self-describing coincidence. It is not a consensus rule. It is why 125 is
-a fitting **symbol** for a floor that must remain complete after repeated
-halving.
+self-describing coincidence. It is not a consensus rule, and it is not the
+ORU subsidy.
 
 ### Other integer identities (secondary)
 
@@ -126,25 +125,12 @@ subsidy consensus.
 middle of that cluster — a small, complete number between a square and a
 power of two.
 
-### What 125 means for the protocol
+### ORU subsidy
 
-The sequence **1000 → 500 → 250 → 125** is fair because each step is the
-same rule: divide by two, using integers, at a fixed height interval. The
-sequence **stops** because a medium of exchange that pays miners cannot be
-allowed to decay to zero without reopening Chapter 1.
-
-125 is therefore:
-
-- the **arithmetic** end of three halvings of 1000
-- the **security-budget** floor for ORU
-- a **symbol** of a value that remains whole after reduction
-
-It is not `destroy_cost(h)`. Live RES mint cost is `destroy_cost(h)` (RFC-020). Retired
-`RATE(k)` was the epoch table RFC-020 replaced. 125 is the small cube
-at which the historical ORU subsidy was allowed to rest.
-
-**Same commitment as the mint inequality:** every step is a published
-integer rule. No hidden schedule. No discretionary last reward.
+The production ORU subsidy is 0 at height 0 and 128 ORU at every height ≥ 1.
+There is no halving schedule and no 125 ORU floor. RES mint cost is
+`destroy_cost(h)` from RFC-020, evaluated by the inequality
+`R · (2²⁵ + h)² ≤ B << 40`. The integer 125 is not a consensus parameter.
 
 ---
 

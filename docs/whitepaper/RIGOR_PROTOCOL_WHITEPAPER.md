@@ -1408,7 +1408,7 @@ this block’s height and pays ORU only. Spend signatures: Ed25519.
 
 `core/src/` is the running consensus. Kernel inventory:
 `formal_verification/rigor_kernel/release/FinalProofInventory.md`.
-Verdict: `docs/verification/FORMAL-VERIFICATION-VERDICT.md`.
+Claim boundary: `docs/verification/FORMAL-VERIFICATION-STATUS.md`.
 Reproduce from a full node against the published rules. Live issuance
 docs: RFC-020, RFC-018. Noun list:
 [`chapters/09-glossary.md`](./chapters/09-glossary.md).

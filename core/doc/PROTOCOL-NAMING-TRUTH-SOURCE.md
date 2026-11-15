@@ -129,9 +129,8 @@ These keys are emitted by `core/src/rpc/blockchain.cpp` (and related RPC). Treat
 
 | Key | Typical context |
 |-----|-----------------|
-| `res_probability_target` | `getblock` verbosity AND `getblockconvergence` / `getconvergencedrawcandidates`. Reports the constitutional constant `Consensus::Params::RES_PROBABILITY_TARGET` (RFC-017 shipping: `E = 246`, windowed; mint cost `C = 1024` ORU). Historical RFC-014 parameter: unwindowed `2^240` (vacuous at satoshi weights). Supersedes the legacy keys `rigor_target` and `res_draw_target`, both of which are PERMANENTLY RETIRED (no compatibility alias). |
-| `rigor_res_minted` | `getblock` |
-| `rigor_winner` | `getblock` |
+| `destroy_cost` | `getconvergencestatus`. Display cost at `confirm_height`. Not the mint predicate input |
+| `cumulative_convergence` | `getblockconvergence` and `getconvergencestatus`. Destroyed ORU total |
 | `res_balance` | snapshots / summaries |
 | `res_total` | cumulative RES mint views |
 | `convergence_root_set_size` | `getblockconvergence` |
@@ -142,7 +141,7 @@ These keys are emitted by `core/src/rpc/blockchain.cpp` (and related RPC). Treat
 
 **Wallet / PSBT extension** (wallet RPC & PSBT helpers): keys prefixed `res_v1_*` in `core/src/rpc/psbt_res_compat.cpp` — stable for tooling that parses PSBT JSON.
 
-**Wallet RPC method names** (string-stable): `sendres`, `createconvergence`, `createresclaim`; blockchain RPC: `getblockconvergence`, `getconvergenceresult`, `getconvergencestatus`, `listconvergencehistory` (see `core/src/wallet/rpc/rpcspend.cpp`, `core/src/rpc/blockchain.cpp`, `core/src/rpc/rawtransaction.cpp`).
+**Wallet RPC method names** registered in this tree include `createconvergence` (`core/src/wallet/rpc/rpcspend.cpp`). Blockchain RPC names registered in this tree include `getblockconvergence`, `getconvergencestatus` (`core/src/rpc/blockchain.cpp`), and `listconvergencehistory` (`core/src/rpc/rawtransaction.cpp`). `getconvergenceresult` is not registered.
 
 ---
 

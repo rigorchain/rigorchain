@@ -2,7 +2,7 @@
 
 **Document status:** Production specification  
 **Historical verification reference:** P0-046  
-**Status:** CURRENT PRODUCTION (implemented in `CheckProofOfWork` / `GetRigorPowHash`). **OpuHash** is the algorithm name for SHA3-256(`"RGRPOW01" || header_80`). The retired 64 KiB mix in `pow_opus.cpp` is not OpuHash.
+**Status:** CURRENT PRODUCTION (implemented in `CheckProofOfWork` / `GetRigorPowHash`). **OpuHash** is the algorithm name for FIPS SHA3-256(`"RGRPOW01" || header_80`). `GetOpusHash` in `pow_opus.cpp` is not this digest. `CheckProofOfWork` does not call it.
 **Parents:** `SPEC-000`, `SPEC-003`
 **Supersedes:** `core/doc/opushash_v3.md`, `core/doc/miner-opushash.md`
 **Governance:** Level-5 (frozen architecture change; requires freeze-declaration amendment)
@@ -161,12 +161,12 @@ well-formed `nBits`.
 
 ## 5. Interface change
 
-### 5.1 Removed
+### 5.1 Not on the CheckProofOfWork path
 
 | Symbol | Location |
 |--------|----------|
-| `GetOpusHash`, `GetOpusHashFromBaseHash` | `core/src/pow_opus.{h,cpp}` (removed from the consensus path; the files are still in the tree and compiled, but `CheckProofOfWork` does not call them) |
-| `OPUS_POW_BUFFER_SIZE`, `OPUS_POW_MIX_ROUNDS` | `core/src/consensus/rigor_consensus_lock.h` |
+| `GetOpusHash`, `GetOpusHashFromBaseHash` | Still defined in `core/src/pow_opus.{h,cpp}`. `CheckProofOfWork` does not call them |
+| `OPUS_POW_BUFFER_SIZE`, `OPUS_POW_MIX_ROUNDS` | Still defined in `core/src/consensus/rigor_consensus_lock.h`. They are inputs to `GetOpusHash`, not to `GetRigorPowHash` |
 | `CheckProofOfWork(uint256 header_hash, ...)` | `core/src/pow.cpp` — **overload deleted (landed)** |
 
 Deleting the `uint256` overload is deliberate. After this change a block
@@ -318,12 +318,12 @@ Work per nonce falls by two to two-and-a-half orders of magnitude:
 
 | | Per-nonce cost |
 |---|---|
-| OpuHash | ≈ 1024 ChaCha20 block operations + ≈ 518 SHA-256 compressions |
-| This specification | 1 Keccak-f[1600] permutation |
+| `GetOpusHash` (not the production digest) | ≈ 1024 ChaCha20 block operations + ≈ 518 SHA-256 compressions |
+| Production OpuHash | 1 Keccak-f[1600] permutation, FIPS SHA3-256 domain suffix `0x06` |
 
 The ratio was measured rather than estimated. Both sides were timed in one
 process, one thread, on one idle machine, linking the tree's real
-`GetOpusHashFromBaseHash` (so the OpuHash side includes its SHA-NI accelerated
+`GetOpusHashFromBaseHash` (so the `GetOpusHash` side includes its SHA-NI accelerated
 SHA-256) against a SHA3-256 that implements the §3 construction exactly — one
 rate block, one permutation, no streaming API.
 

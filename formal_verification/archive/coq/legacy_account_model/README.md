@@ -1,6 +1,6 @@
 # Legacy account-model Coq kernel (W9)
 
-**Status:** deprecated. Not the C++ consensus model.
+These files are a global account model. They are not the C++ consensus model.
 
 ```
 equivalence_claimed = false

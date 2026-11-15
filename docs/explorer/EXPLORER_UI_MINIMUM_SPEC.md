@@ -35,7 +35,7 @@
 | Section | Content |
 |---------|---------|
 | Header | All STABLE header fields including `bits` (labeled PoW), `opus_hash`, RFC-020 `destroy_cost(h)` |
-| Convergence panel | `OP_CONVERGE` destroys in this block; observer `getconvergenceresult` summary |
+| Convergence panel | `0xbd` destroys in this block, and any Witness v1 RES minted by those transactions |
 | Transactions | txid list with badges: coinbase, convergence destroy, res_mint, res_transfer |
 | Mismatch alert | If committed ≠ computed (observer integrity only) |
 

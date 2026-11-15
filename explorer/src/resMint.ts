@@ -1,7 +1,8 @@
 /**
  * Explorer mint adapter: RFC-020 issuance is a body transaction.
  * Same tx burns ORU (`OP_CONVERGE`) and creates Witness v1 RES.
- * Coinbase `OP_RES_MINT` (0xbb) is not the live issuance path.
+ * A 0xbb template is not the live issuance path. The indexer classifies it
+ * as INVALID, so this adapter does not treat it as a RES mint output.
  */
 
 import { isConvergenceScriptPubKey } from "./script";

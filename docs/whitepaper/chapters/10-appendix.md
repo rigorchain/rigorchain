@@ -16,15 +16,14 @@ lives in Chapter 8 §8.5. This appendix does not repeat it.
 
 | Symbol | Value |
 |--------|-------|
-| ORU subsidy | `R(0) = 0`; 128 ORU per block for `h ≥ 1`; no halving |
-| `ORU_MIN_BLOCK_SUBSIDY` | 128 ORU |
+| ORU subsidy | 0 ORU at height 0; 128 ORU at every height ≥ 1. No halving |
 | Mint predicate | `R > 0 → R · (2²⁵ + h)² ≤ B << 40` |
 | Display form | `destroy_cost(h) = 1024 · (2²⁵ + h)² / 2⁵⁰` ORU per whole RES (`2⁵⁰` = curve normalization denominator, not a consensus shift) |
 | Genesis whole-coin cost | 1024 ORU / 1 RES (`destroy_cost(0) = 102400000000` atoms) |
 | `RES_DESTROY_POLE` | `2²⁵ = 33,554,432` |
 | `RES_DESTROY_SHIFT` | `40 = 50 − log₂(1024)` (integer consensus scaling factor `B << 40`; not the `destroy_cost` denominator) |
 | Derived ceiling | `2⁷ / 2¹⁰ · 2²⁵ = 2²² = 4,194,304` RES (`419430400000000` atoms) |
-| Cumulative ceiling | `cumulative(h) = 2²² · h / (h + 2²⁵)` |
+| Cumulative helper | `floor(2²² · RES_COIN · h / (h + 2²⁵))` atoms for `h > 0`. Not the sum of per-block integer mint maxima |
 | `RES_COIN` | 100000000 atoms per whole coin |
 | Mint locus | Body tx: unique positive `OP_CONVERGE` + same-tx Witness v1 RES |
 | Mint maturity | 100 (same as coinbase; reorg protection) |
@@ -94,7 +93,7 @@ Coinbase states this block’s height and pays ORU only.
 | `formal_verification/rigor_kernel/` | Coq kernel model |
 | `formal_verification/rigor_kernel/release/FinalProofInventory.md` | Classified theorem inventory (snapshot, not a parameter) |
 | `formal_verification/rigor_kernel/release/FormalizationFrontier.md` | Formalization frontier |
-| `docs/verification/FORMAL-VERIFICATION-VERDICT.md` | What the model proves |
+| `docs/verification/FORMAL-VERIFICATION-STATUS.md` | Production rules versus what a model does not prove |
 | `docs/developer/CODE_SSOT_PROTOCOL_FACTS.md` | Code-fact extract |
 | `docs/specification/RIGOR_OPCODE_SPECIFICATION.md` | Opcodes |
 | `docs/mining/CONVERGENCE_ROOT_CANONICAL_SPEC.md` | Convergence Root encoding |

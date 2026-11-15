@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Historical integer model of the RFC-019 RES unit-price schedule.
+"""Epoch unit-price experiment. Not the production issuance schedule.
 
-Not the shipping SSOT. RFC-020 lives in tools/res_continuous_price_schedule.py
-and core/src/consensus/res_issuance.h. Keep this file only to reconstruct
-the superseded epoch table.
+`GetBlockSubsidy` pays 0 ORU at height 0 and 128 ORU at every height >= 1.
+This file does not compute that function. Its epoch table, 1 000 ORU first
+epoch and 125 ORU tail are parameters of this experiment only. Its derived
+sum is not `RES_MAX_SUPPLY` (`2^22` RES) and is not chain issuance.
 
-Every number in RFC-019 comes from this file. Nothing here uses floating
-point: the schedule, the cap and the overflow margins are all computed with
-Python ints under the same operations the historical C++ header used.
+Nothing here uses floating point for the price curve. The arithmetic is the
+integer epoch model, kept so that model can still be reconstructed.
 
     python3 tools/res_issuance_schedule.py             human-readable report
     python3 tools/res_issuance_schedule.py --json      machine-readable
@@ -17,12 +17,12 @@ import argparse
 import json
 import sys
 
-# --- fixed by the existing protocol, not decided here -----------------------
-COIN = 100_000_000               # ORU atoms per ORU
-RES_REWARD_EPOCH = 210_000       # blocks per epoch
-RES_REWARD_LAST_EPOCH = 250      # last epoch that issues
-ORU_GENESIS_SUBSIDY = 1_000      # ORU per block, epoch 0
-ORU_TAIL_SUBSIDY = 125           # ORU per block, epoch >= 3
+# --- experiment parameters, not GetBlockSubsidy -----------------------------
+COIN = 100_000_000               # display unit used by this experiment
+RES_REWARD_EPOCH = 210_000       # blocks per epoch in this experiment
+RES_REWARD_LAST_EPOCH = 250      # last epoch this experiment sums
+ORU_GENESIS_SUBSIDY = 1_000      # experiment epoch-0 ORU, not height 0
+ORU_TAIL_SUBSIDY = 125           # experiment tail, not the live 128 ORU subsidy
 
 # --- decided by RFC-019 -----------------------------------------------------
 RES_COIN = 100_000_000           # RES atoms per RES; matches ORU
@@ -36,6 +36,16 @@ INT64_MAX = (1 << 63) - 1
 def isqrt(n):
     """Floor square root. Mirrors ResIntegerSqrt in rigor_consensus_lock.h."""
     return __import__("math").isqrt(n)
+
+
+def unit_destroy_cost(k):
+    """Same integer as unit_price.
+
+    The report called this name, and the module never defined it. The
+    price function's own note is that epoch 0 equals RES_DESTROY_COST_GENESIS,
+    so the report's genesis comparison is unit_price(0).
+    """
+    return unit_price(k)
 
 
 def unit_price(k):
@@ -66,12 +76,12 @@ def oru_subsidy(k):
 
 
 def oru_emitted(k):
-    """ORU atoms created by block subsidy during epoch k.
+    """ORU atoms this experiment assigns to epoch k.
 
-    Epoch 0 has 209 999 paying blocks, not 210 000. GetBlockSubsidy returns 0
-    at height 0 and rigor_issuance.cpp is explicit that the missing 1000 ORU is
-    never compensated later (P0-038). Using the round 210 000 here would put
-    0.98 RES of slack into a cap that is supposed to be exactly the bound.
+    Epoch 0 of the experiment counts 209 999 blocks, not 210 000, and then
+    multiplies by this file's 1 000 ORU epoch amount. Production
+    GetBlockSubsidy is 0 at height 0 and 128 ORU at every height >= 1.
+    This function does not compute that subsidy.
     """
     blocks = RES_REWARD_EPOCH - 1 if k == 0 else RES_REWARD_EPOCH
     return blocks * oru_subsidy(k) * COIN
@@ -107,7 +117,8 @@ def derived_cap():
     it appears. That maximum is the per-epoch sum below.
 
     It is an upper bound and not an estimate: fees, lost keys and ORU held
-    rather than burned can only lower realised issuance.
+    rather than burned can only lower the sum this experiment attributes
+    to that schedule. The sum is not production supply.
     """
     return sum(max_res_from_epoch(k) for k in range(RES_REWARD_LAST_EPOCH + 1))
 
@@ -155,7 +166,9 @@ def report():
     r = rows()
     p0, pl = unit_destroy_cost(0), unit_price(RES_REWARD_LAST_EPOCH)
 
-    print("RFC-019 — RES destroy cost schedule")
+    print("Epoch unit-price experiment — not GetBlockSubsidy")
+    print("Production subsidy: 0 ORU at height 0, 128 ORU at every height >= 1.")
+    print("The ORU/blk column below is this experiment's epoch table, not that subsidy.")
     print("=" * 76)
     print(f"  RES_COIN               {RES_COIN:>24,}")
     print(f"  RES_DESTROY_COST_GENESIS {RES_DESTROY_COST_GENESIS:>24,} atoms "
@@ -171,7 +184,7 @@ def report():
     print(f"  RATE strictly increasing over 0..250:      {mono}")
     print(f"  hardening RATE(250)/RATE(0):               {pl/p0:.1f}x")
     print()
-    print(f"  DERIVED CAP  {cap:>24,} atoms = {cap/RES_COIN:,.8f} RES")
+    print(f"  experiment sum {cap:>24,} atoms = {cap/RES_COIN:,.8f} units")
     print()
 
     print(f"{'epoch':>6} {'first height':>13} {'ORU/blk':>8} "
@@ -197,13 +210,13 @@ def report():
     print("  so the arithmetic machinery gets strictly smaller, not larger.")
     print()
 
-    print("cap utilisation equals participation, by construction")
+    print("experiment sum scaled by rho — not chain issuance")
     print("-" * 76)
     for rho_num, rho_den in ((5, 100), (20, 100), (50, 100), (100, 100)):
-        realised = sum(max_res_from_epoch(k) * rho_num // rho_den
-                       for k in range(RES_REWARD_LAST_EPOCH + 1))
-        print(f"  rho = {rho_num:>3}%   realised {realised/RES_COIN:>14,.0f} RES"
-              f"   utilisation {realised/cap:>7.1%}")
+        scaled = sum(max_res_from_epoch(k) * rho_num // rho_den
+                     for k in range(RES_REWARD_LAST_EPOCH + 1))
+        print(f"  rho = {rho_num:>3}%   experiment sum {scaled/RES_COIN:>14,.0f} RES"
+              f"   share of this experiment's sum {scaled/cap:>7.1%}")
 
 
 def markdown():
@@ -216,7 +229,7 @@ def markdown():
     print(f"| `RES_DESTROY_POLE_OFFSET` | {RES_DESTROY_POLE_OFFSET} |")
     print(f"| `RES_REWARD_EPOCH` | {RES_REWARD_EPOCH:,} blocks |".replace(",", " "))
     print(f"| `RES_REWARD_LAST_EPOCH` | {RES_REWARD_LAST_EPOCH} |")
-    print(f"| `RES_MAX_SUPPLY` | {cap:,} atoms (derived) |".replace(",", " "))
+    print(f"| experiment sum | {cap:,} atoms (this file, not production RES_MAX_SUPPLY) |".replace(",", " "))
     print()
     print("| Epoch | First height | ORU/block | RATE (ORU per RES) | Max RES from this epoch |")
     print("|------:|-------------:|----------:|-------------------:|------------------------:|")
@@ -226,64 +239,24 @@ def markdown():
               .replace(",", " "))
 
 
-RFC = "docs/archive/rfc/RFC-019-RES-DETERMINISTIC-UNIT-PRICE.md"
-
-
 def check_doc():
-    """Confirm every load-bearing number in RFC-019 is one this script produces.
+    """Report that the RFC-019 numeric agreement check no longer has a target.
 
-    Phase 1 of the execution plan forbids hand-computed numbers in the RFC. The
-    only way that holds up over edits is to check it, so each claim below is
-    derived here and then looked for in the document text. Digit grouping in the
-    RFC uses thin spaces, so both spellings are accepted.
+    The flag was added to confirm that
+    docs/archive/rfc/RFC-019-RES-DETERMINISTIC-UNIT-PRICE.md contained the
+    integers this epoch experiment derives. That file is not in this public
+    tree. RFC-020 describes GetBlockSubsidy and the destroy-cost predicate,
+    not this epoch table, so it is not a substitute document. Returning
+    success here would claim a check that was not performed.
     """
-    import pathlib
-    path = pathlib.Path(__file__).resolve().parent.parent / RFC
-    if not path.is_file():
-        print(f"FAIL: {RFC} not found", file=sys.stderr)
-        return 1
-    text = path.read_text()
-    cap = derived_cap()
-
-    def num(n):
-        return [f"{n:,}", f"{n:,}".replace(",", " "), str(n)]
-
-    claims = [("RES_COIN", num(RES_COIN)),
-              ("RES_DESTROY_COST_GENESIS", num(RES_DESTROY_COST_GENESIS)),
-              ("genesis destroy cost in ORU", num(RES_DESTROY_COST_GENESIS // COIN)),
-              ("pole offset", [str(RES_DESTROY_POLE_OFFSET)]),
-              ("epoch length", num(RES_REWARD_EPOCH)),
-              ("last epoch", [str(RES_REWARD_LAST_EPOCH)]),
-              ("derived cap atoms", num(cap)),
-              ("derived cap in RES", [f"{cap // RES_COIN:,}".replace(",", " ")]),
-              ("hardening",
-               [f"{unit_price(RES_REWARD_LAST_EPOCH) / unit_destroy_cost(0):.1f}"]),
-              ("epoch 0 share",
-               [f"{max_res_from_epoch(0) / cap:.2%}".replace("%", "")]),
-              ]
-    for k in (0, 1, 2, 3, 5, 10, 20, 50, 100, 250):
-        claims.append((f"RATE({k})",
-                       [f"{unit_price(k) / COIN:,.2f}".replace(",", " ")]))
-        claims.append((f"max RES from epoch {k}",
-                       [f"{max_res_from_epoch(k) / RES_COIN:,.2f}".replace(",", " ")]))
-    for rho_num in (5, 20, 50, 100):
-        realised = sum(max_res_from_epoch(k) * rho_num // 100
-                       for k in range(RES_REWARD_LAST_EPOCH + 1))
-        # Same formatting as report(): the RFC table is human-readable and
-        # rounds. Flooring here instead is what made this check fail on its
-        # first run, which is the check working.
-        claims.append((f"realised at rho={rho_num}%",
-                       [f"{realised / RES_COIN:,.0f}".replace(",", " ")]))
-
-    rc = 0
-    for name, spellings in claims:
-        if not any(s in text for s in spellings):
-            print(f"FAIL: {name} — none of {spellings} appears in the RFC",
-                  file=sys.stderr)
-            rc = 1
-    if rc == 0:
-        print(f"OK: {len(claims)} numbers in RFC-019 are reproduced by this script")
-    return rc
+    print(
+        "NOT_APPLICABLE: --check-doc compared this epoch experiment with "
+        "docs/archive/rfc/RFC-019-RES-DETERMINISTIC-UNIT-PRICE.md. "
+        "That file is not in this tree. RFC-020 is a different schedule and "
+        "is not checked here. This command does not validate production issuance.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def main():
@@ -291,7 +264,7 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--markdown", action="store_true")
     ap.add_argument("--check-doc", action="store_true",
-                    help="verify RFC-019 contains only numbers this script derives")
+                    help="report that the removed RFC-019 numeric check does not apply")
     a = ap.parse_args()
     if a.check_doc:
         sys.exit(check_doc())
@@ -303,7 +276,7 @@ def main():
                 "RES_DESTROY_POLE_OFFSET": RES_DESTROY_POLE_OFFSET,
                 "RES_REWARD_EPOCH": RES_REWARD_EPOCH,
                 "RES_REWARD_LAST_EPOCH": RES_REWARD_LAST_EPOCH,
-                "RES_MAX_SUPPLY_derived": derived_cap(),
+                "experiment_sum_atoms": derived_cap(),
             },
             "schedule": rows(),
         }, sys.stdout, indent=2)
