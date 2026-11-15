@@ -884,8 +884,7 @@ void RigorGUI::createTrayIcon()
 #ifndef Q_OS_MACOS
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
         trayIcon = new QSystemTrayIcon(m_network_style->getTrayAndWindowIcon(), this);
-        QString toolTip = tr("%1 client").arg(RigorWallet::WalletIdentity::brand().productName) + " " + m_network_style->getTitleAddText();
-        trayIcon->setToolTip(toolTip);
+        trayIcon->setToolTip(trayStatusText());
     }
 #endif
 }
@@ -1161,6 +1160,36 @@ QString RigorGUI::networkStatusPlain() const
     return lines.join(QLatin1Char('\n'));
 }
 
+QString RigorGUI::trayStatusText() const
+{
+    QString title = RigorWallet::WalletIdentity::brand().productName;
+    const QString network = m_network_style->getTitleAddText().trimmed();
+    if (!network.isEmpty()) {
+        title += QLatin1Char(' ') + network;
+    }
+    if (!m_node.getNetworkActive()) {
+        return tr("%1 — Network paused").arg(title);
+    }
+
+    const TorNetworkMode running = RunningTorNetworkMode();
+    if (running == TorNetworkMode::Normal) {
+        return title;
+    }
+
+    const TorServiceStatus status = GetTorServiceStatus();
+    if (status.identity_error) {
+        return tr("%1 — Tor identity error").arg(title);
+    }
+    if (!status.socks_handshake_ok) {
+        return tr("%1 — Tor not connected").arg(title);
+    }
+    // Outbound-only does not monitor bootstrap. The SOCKS5 greeting is the connection.
+    if (running != TorNetworkMode::OutboundOnly && !status.bootstrap_complete) {
+        return tr("%1 — Tor connecting").arg(title);
+    }
+    return tr("%1 — Tor connected").arg(title);
+}
+
 void RigorGUI::updateNetworkState()
 {
     if (!clientModel) return;
@@ -1184,7 +1213,7 @@ void RigorGUI::updateNetworkState()
     QString tooltip = QLatin1String("<nobr>") + plain.toHtmlEscaped().replace(QLatin1Char('\n'), QLatin1String("<br>")) +
                       QLatin1String("<br>") + tr("Click for more actions.") + QLatin1String("</nobr>");
     connectionsControl->setToolTip(tooltip);
-    if (trayIcon) trayIcon->setToolTip(plain);
+    if (trayIcon) trayIcon->setToolTip(trayStatusText());
     connectionsControl->setThemedPixmap(icon, STATUSBAR_ICONSIZE, STATUSBAR_ICONSIZE);
 }
 
@@ -1626,6 +1655,7 @@ void RigorGUI::updateWalletStatus()
 
 void RigorGUI::updateTorStatus()
 {
+    if (trayIcon) trayIcon->setToolTip(trayStatusText());
     if (!labelTorStatus) return;
     if (!clientModel || !clientModel->torStatusVisible()) {
         labelTorStatus->clear();
@@ -1633,7 +1663,8 @@ void RigorGUI::updateTorStatus()
         return;
     }
     labelTorStatus->setVisible(true);
-    labelTorStatus->setText(clientModel->torStatusSummary());
+    labelTorStatus->setText(trayStatusText());
+    labelTorStatus->setToolTip(QString());
 }
 
 void RigorGUI::updateProxyIcon()

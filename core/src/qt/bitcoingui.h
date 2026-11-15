@@ -221,6 +221,8 @@ private:
     void requestSeedLookups();
     /** Plain-text peer and seed status. Hostnames are attached only to a matching live endpoint. */
     QString networkStatusPlain() const;
+    /** One short line for the tray icon and the status-bar Tor label. */
+    QString trayStatusText() const;
 
     bool m_seed_watch_started{false};
     //! Id returned by WatchConfiguredSeeds. 0 means this window has no watcher.
