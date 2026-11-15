@@ -27,6 +27,14 @@ QLabel* label(const DualityStatisticsPage& page, const char* name)
     return page.findChild<QLabel*>(QString::fromLatin1(name));
 }
 
+QString displayedAmount(const QString& formatted)
+{
+    // DualityStatisticsPage::setAmount keeps the narrow gap but uses U+202F so the amount cannot wrap.
+    QString shown = formatted;
+    shown.replace(QChar(THIN_SP_CP), QChar(0x202F));
+    return shown;
+}
+
 EconomicsSnapshot authoritativeSample()
 {
     EconomicsSnapshot snapshot;
@@ -117,10 +125,10 @@ void DualityStatisticsTests::snapshotValuesAndStaleRetention()
     const EconomicsSnapshot current = authoritativeSample();
     page.applySnapshot(current);
 
-    const QString schedule = BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.subsidy, BitcoinUnits::Unit::ORU);
-    const QString burned = BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.convergence, BitcoinUnits::Unit::ORU);
-    const QString remaining = BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_remaining, BitcoinUnits::Unit::ORU);
-    const QString supply = BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_supply, BitcoinUnits::Unit::ORU);
+    const QString schedule = displayedAmount(BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.subsidy, BitcoinUnits::Unit::ORU));
+    const QString burned = displayedAmount(BitcoinUnits::formatAmountForAsset(ASSET_ORU, current.amounts.convergence, BitcoinUnits::Unit::ORU));
+    const QString remaining = displayedAmount(BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_remaining, BitcoinUnits::Unit::ORU));
+    const QString supply = displayedAmount(BitcoinUnits::formatAmountForAsset(ASSET_RES, current.amounts.res_supply, BitcoinUnits::Unit::ORU));
     QCOMPARE(label(page, "oruScheduleValue")->text(), schedule);
     QCOMPARE(label(page, "oruConvergenceValue")->text(), burned);
     QCOMPARE(label(page, "oruFeeValue")->text(), QStringLiteral("N/A"));
