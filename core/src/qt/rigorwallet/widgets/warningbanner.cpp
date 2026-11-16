@@ -72,29 +72,31 @@ void WarningBanner::hideBanner()
 void WarningBanner::applyLevelStyle()
 {
     const ColorPalette p = RigorTheme::colors();
-    QColor bg;
+    const QColor chip(QStringLiteral("#6A3018"));
+    const QColor chipText(QStringLiteral("#F4E8D6"));
+    QColor bg = p.bgElevated;
     QColor fg = p.textPrimary;
     QColor border = p.borderSubtle;
 
     switch (m_level) {
     case WarningLevel::Info:
-        bg = p.bgPrimary;
+        bg = p.bgElevated;
         fg = p.textPrimary;
         border = p.borderSubtle;
         break;
     case WarningLevel::Warning:
-        bg = p.bgPrimary;
-        fg = p.textPrimary;
-        border = p.borderSubtle;
+        bg = chip;
+        fg = chipText;
+        border = chip;
         break;
     case WarningLevel::Critical:
-        bg = p.bgPrimary;
-        fg = p.textPrimary;
-        border = p.borderSubtle;
+        bg = chip;
+        fg = chipText;
+        border = chip;
         break;
     case WarningLevel::Verification:
-        bg = p.bgPrimary;
-        fg = p.textPrimary;
+        bg = p.bgElevated;
+        fg = p.textSecondary;
         border = p.borderSubtle;
         break;
     }

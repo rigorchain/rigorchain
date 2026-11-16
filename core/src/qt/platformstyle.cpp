@@ -86,9 +86,8 @@ PlatformStyle::PlatformStyle(const QString &_name, bool _imagesOnButtons, bool _
 
 QColor PlatformStyle::TextColor() const
 {
-    // Wallet chrome is always dark (#000000). Do not use QApplication::palette()
-    // WindowText — on Windows/Linux light system themes that is black, so toolbar
-    // and overlay icons stay black on the dark background.
+    // Functional icons use blue-black ballpoint ink. The application logo is
+    // loaded by NetworkStyle and is not passed through this color.
     return RigorWallet::RigorTheme::colors().textPrimary;
 }
 

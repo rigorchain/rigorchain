@@ -1,2 +1,28 @@
-/* Icon for rigor-wallet.exe (mainnet launcher). Packaging only. */
+/* Icon and user-facing version for rigor-wallet.exe. Packaging only. */
+#include <windows.h>
 1 ICON "rigor.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     0,3,0,0
+PRODUCTVERSION  0,3,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName",      "RIGOR"
+            VALUE "FileDescription",  "RIGOR Wallet"
+            VALUE "FileVersion",      "v0.3"
+            VALUE "InternalName",     "rigor-wallet"
+            VALUE "OriginalFilename", "rigor-wallet.exe"
+            VALUE "ProductName",      "RIGOR Wallet"
+            VALUE "ProductVersion",   "v0.3"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1252
+    END
+END

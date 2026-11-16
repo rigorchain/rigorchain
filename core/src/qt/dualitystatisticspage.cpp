@@ -141,15 +141,16 @@ DualityStatisticsPage::DualityStatisticsPage(QWidget* parent)
     const RigorWallet::Typography type = RigorWallet::RigorTheme::typography();
     const RigorWallet::Spacing space = RigorWallet::RigorTheme::spacing();
     setObjectName(QStringLiteral("DualityStatisticsPage"));
-    setStyleSheet(QStringLiteral("QWidget#DualityStatisticsPage { background-color: %1; }")
+    setStyleSheet(QStringLiteral(
+        "QWidget#DualityStatisticsPage { background-color: %1; background-image: url(:/images/paper_grain); background-repeat: repeat; }")
                       .arg(RigorWallet::RigorTheme::colorHex(colors.bgPrimary)));
 
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setStyleSheet(QStringLiteral(
-        "QScrollArea { background: %1; border: none; } QScrollArea > QWidget > QWidget { background: %1; }")
-                              .arg(RigorWallet::RigorTheme::colorHex(colors.bgPrimary)));
+        "QScrollArea { background: transparent; border: none; } QScrollArea > QWidget > QWidget { background: transparent; }"));
+    scroll->viewport()->setAutoFillBackground(false);
     auto* body = new QWidget(scroll);
     auto* layout = new QVBoxLayout(body);
     layout->setContentsMargins(space.cardPadding, space.cardPadding, space.cardPadding, space.cardPadding);

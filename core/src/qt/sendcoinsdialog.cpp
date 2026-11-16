@@ -1197,9 +1197,7 @@ void SendCoinsDialog::updateExtremeSafetyControls()
     ui->labelExtremeSafetyWarning->setText(warn);
     ui->labelExtremeSafetyWarning->setVisible(!network_ok);
     if (!network_ok) {
-        const int lightness = ui->labelExtremeSafetyWarning->palette().color(QPalette::WindowText).lightness();
-        const QColor warning_colour(255 - (lightness / 5), 176 - (lightness / 3), 48 - (lightness / 14));
-        ui->labelExtremeSafetyWarning->setStyleSheet(QStringLiteral("QLabel { color: %1; }").arg(warning_colour.name()));
+        ui->labelExtremeSafetyWarning->setStyleSheet(QStringLiteral("QLabel { color: #6A3018; }"));
     } else {
         ui->labelExtremeSafetyWarning->setStyleSheet(QString());
     }
@@ -1243,9 +1241,7 @@ void SendCoinsDialog::updateSmartFeeLabel()
         ui->labelSmartFee2->show(); // (Smart fee not initialized yet. This usually takes a few blocks...)
         ui->labelFeeEstimation->setText("");
         ui->fallbackFeeWarningLabel->setVisible(true);
-        int lightness = ui->fallbackFeeWarningLabel->palette().color(QPalette::WindowText).lightness();
-        QColor warning_colour(255 - (lightness / 5), 176 - (lightness / 3), 48 - (lightness / 14));
-        ui->fallbackFeeWarningLabel->setStyleSheet("QLabel { color: " + warning_colour.name() + "; }");
+        ui->fallbackFeeWarningLabel->setStyleSheet(QStringLiteral("QLabel { color: #6A3018; }"));
         ui->fallbackFeeWarningLabel->setIndent(GUIUtil::TextWidth(QFontMetrics(ui->fallbackFeeWarningLabel->font()), "x"));
     }
     else

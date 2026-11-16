@@ -48,21 +48,22 @@ QString StatusBadge::labelForColor(StatusBadgeColor color)
 void StatusBadge::applyStyle()
 {
     const ColorPalette p = RigorTheme::colors();
+    const QColor chipText(QStringLiteral("#F4E8D6"));
     QColor bg;
-    QColor fg = p.textPrimary;
+    QColor fg = chipText;
     switch (m_color) {
     case StatusBadgeColor::Green:
         bg = p.success;
         break;
     case StatusBadgeColor::Yellow:
         bg = p.warning;
-        fg = QColor(QStringLiteral("#1A2332"));
         break;
     case StatusBadgeColor::Red:
         bg = p.critical;
         break;
     case StatusBadgeColor::Gray:
         bg = p.experimental;
+        fg = p.textPrimary;
         break;
     }
     setStyleSheet(QStringLiteral(

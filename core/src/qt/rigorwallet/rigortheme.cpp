@@ -16,28 +16,28 @@ static QColor withAlpha(const QColor& base, int alpha)
 ColorPalette RigorTheme::colors()
 {
     ColorPalette p;
-    p.bgPrimary = QColor(QStringLiteral("#000000"));
-    p.bgSurface = QColor(QStringLiteral("#111111"));
-    p.bgElevated = QColor(QStringLiteral("#222222"));
-    p.borderSubtle = QColor(QStringLiteral("#333333"));
-    p.borderStrong = QColor(QStringLiteral("#444444"));
-    p.textPrimary = QColor(QStringLiteral("#FFFFFF"));
-    p.textSecondary = QColor(QStringLiteral("#FFFFFF"));
-    p.textMuted = QColor(QStringLiteral("#BBBBBB"));
-    p.textDisabled = QColor(QStringLiteral("#888888"));
-    p.accent = QColor(QStringLiteral("#FF6A2B"));
-    p.accentHover = QColor(QStringLiteral("#E85A20"));
-    p.link = QColor(QStringLiteral("#FFFFFF"));
-    p.success = QColor(QStringLiteral("#8FDC5A"));
-    p.warning = QColor(QStringLiteral("#FFB74D"));
-    p.critical = QColor(QStringLiteral("#FF6B6B"));
-    p.info = QColor(QStringLiteral("#8CC8FF"));
-    p.experimental = QColor(QStringLiteral("#BBBBBB"));
-    p.assetOru = QColor(QStringLiteral("#8CC8FF"));
+    p.bgPrimary = QColor(QStringLiteral("#E3D1B8"));
+    p.bgSurface = QColor(QStringLiteral("#EADCC6"));
+    p.bgElevated = QColor(QStringLiteral("#EADCC6"));
+    p.borderSubtle = QColor(QStringLiteral("#8A7E6C"));
+    p.borderStrong = QColor(QStringLiteral("#6E6456"));
+    p.textPrimary = QColor(QStringLiteral("#26394B"));
+    p.textSecondary = QColor(QStringLiteral("#526477"));
+    p.textMuted = QColor(QStringLiteral("#526477"));
+    p.textDisabled = QColor(QStringLiteral("#7A8794"));
+    p.accent = QColor(QStringLiteral("#6A3018"));
+    p.accentHover = QColor(QStringLiteral("#542614"));
+    p.link = QColor(QStringLiteral("#3E5568"));
+    p.success = QColor(QStringLiteral("#2E4A32"));
+    p.warning = QColor(QStringLiteral("#6A3018"));
+    p.critical = QColor(QStringLiteral("#6A3018"));
+    p.info = QColor(QStringLiteral("#3E5568"));
+    p.experimental = QColor(QStringLiteral("#C4B49C"));
+    p.assetOru = QColor(QStringLiteral("#3E5568"));
     p.assetOruBg = withAlpha(p.assetOru, 0x14);
-    p.assetRes = QColor(QStringLiteral("#8FDC5A"));
+    p.assetRes = QColor(QStringLiteral("#3E6244"));
     p.assetResBg = withAlpha(p.assetRes, 0x14);
-    p.convergence = QColor(QStringLiteral("#8CC8FF"));
+    p.convergence = QColor(QStringLiteral("#3E5568"));
     p.convergenceBg = withAlpha(p.convergence, 0x14);
     return p;
 }

@@ -25,6 +25,9 @@
  * Anything other than a define should be guarded below.
  */
 
+/** User-facing release identity. Not packed CLIENT_VERSION and not a consensus version. */
+#define RIGOR_RELEASE_VERSION_STR "v0.3"
+
 #if !defined(WINDRES_PREPROC)
 
 #include <string>
@@ -37,8 +40,8 @@ static const int CLIENT_VERSION =
 
 extern const std::string CLIENT_NAME;
 
-/** Product release identity (tag / installer / About). Not the packed CLIENT_VERSION integer. */
-inline constexpr const char* RIGOR_RELEASE_VERSION = "v0.2.3";
+/** Product release identity (installer / About / --version). Same text as RIGOR_RELEASE_VERSION_STR. */
+inline constexpr const char* RIGOR_RELEASE_VERSION = "v0.3";
 inline constexpr const char* RIGOR_RELEASE_CODENAME = "Production Release";
 
 std::string FormatFullVersion();

@@ -219,7 +219,7 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
         .arg(RigorWallet::WalletIdentity::networkDisplayName()));
     m_syncStatusBanner->setStyleSheet(QStringLiteral(
         "QLabel#RigorSyncStatusBanner {"
-        "  background: #111111; color: #FFFFFF; border: 1px solid #333333;"
+        "  background: #EADCC6; color: #26394B; border: 1px solid #8A7E6C;"
         "  border-radius: 6px; padding: 10px;"
         "}"));
     ui->topLayout->insertWidget(0, m_syncStatusBanner);

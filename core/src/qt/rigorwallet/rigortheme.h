@@ -10,31 +10,31 @@
 
 namespace RigorWallet {
 
-/** Color tokens aligned with Explorer MVP dark theme (black page, dark-gray surfaces). */
+/** Unified parchment notebook. Primary text is blue-black ballpoint ink. */
 struct ColorPalette {
-    QColor bgPrimary;       // #000000
-    QColor bgSurface;       // #111111
-    QColor bgElevated;      // #222222
-    QColor borderSubtle;    // #333333
-    QColor borderStrong;    // #444444
-    QColor textPrimary;     // #FFFFFF
-    QColor textSecondary;   // #FFFFFF
-    QColor textMuted;       // #BBBBBB
-    QColor textDisabled;    // #888888
-    QColor accent;          // #FF6A2B
-    QColor accentHover;     // #E85A20
-    QColor link;            // #FFFFFF
-    QColor success;         // #8FDC5A
-    QColor warning;         // #FFB74D
-    QColor critical;        // #FF6B6B
-    QColor info;            // #8CC8FF
-    QColor experimental;    // #BBBBBB
-    QColor assetOru;        // #8CC8FF
-    QColor assetOruBg;      // #8CC8FF14
-    QColor assetRes;        // #8FDC5A
-    QColor assetResBg;      // #8FDC5A14
-    QColor convergence;     // #8CC8FF
-    QColor convergenceBg;   // #8CC8FF14
+    QColor bgPrimary;       // #E3D1B8 workspace paper
+    QColor bgSurface;       // #EADCC6 card paper
+    QColor bgElevated;      // #EADCC6 card paper
+    QColor borderSubtle;    // #8A7E6C
+    QColor borderStrong;    // #6E6456
+    QColor textPrimary;     // #26394B
+    QColor textSecondary;   // #526477
+    QColor textMuted;       // #526477
+    QColor textDisabled;    // #7A8794
+    QColor accent;          // #6A3018
+    QColor accentHover;     // #542614
+    QColor link;            // #3E5568
+    QColor success;         // #2E4A32
+    QColor warning;         // #6A3018
+    QColor critical;        // #6A3018
+    QColor info;            // #3E5568
+    QColor experimental;    // #C4B49C
+    QColor assetOru;        // #3E5568
+    QColor assetOruBg;      // #3E556814
+    QColor assetRes;        // #3E6244
+    QColor assetResBg;      // #3E624414
+    QColor convergence;     // #3E5568
+    QColor convergenceBg;   // #3E556814
 };
 
 /** Typography scale from PROGRAM-005 RIGOR_VISUAL_LANGUAGE. */

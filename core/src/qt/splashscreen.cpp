@@ -30,11 +30,11 @@
 #include <QScreen>
 
 namespace {
-/** Pale gold accent (~#E3C58B). */
-const QColor SPLASH_GOLD(0xE3, 0xC5, 0x8B);
-const QColor SPLASH_BG(0x0C, 0x0C, 0x0E);
-const QColor SPLASH_TEXT(0xF2, 0xF0, 0xEA);
-const QColor SPLASH_MUTED(0xB8, 0xB0, 0xA0);
+/** Blue-black ballpoint on the parchment splash. The logo pixmap is not recolored. */
+const QColor SPLASH_GOLD(0x26, 0x39, 0x4B);
+const QColor SPLASH_BG(0xE3, 0xD1, 0xB8);
+const QColor SPLASH_TEXT(0x26, 0x39, 0x4B);
+const QColor SPLASH_MUTED(0x52, 0x64, 0x77);
 
 QFont SplashScreenStatusFont()
 {
@@ -63,11 +63,9 @@ QPixmap BuildProductionSplash(const NetworkStyle* networkStyle, qreal devicePixe
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setRenderHint(QPainter::TextAntialiasing, true);
 
-    // Soft vignette
-    QRadialGradient glow(QPointF(W * 0.35, H * 0.42), W * 0.55);
-    glow.setColorAt(0.0, QColor(80, 40, 10, 90));
-    glow.setColorAt(1.0, QColor(0, 0, 0, 0));
-    p.fillRect(QRect(0, 0, W, H), glow);
+    p.setPen(QPen(QColor(0x8A, 0x7E, 0x6C), 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(QRect(0, 0, W - 1, H - 1));
 
     // Official app icon
     const QSize iconPx(280, 280);

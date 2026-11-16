@@ -532,15 +532,20 @@ RPCConsole::RPCConsole(interfaces::Node& node, const PlatformStyle *_platformSty
     if (platformStyle->getImagesOnButtons()) {
         ui->openDebugLogfileButton->setIcon(platformStyle->SingleColorIcon(":/icons/export"));
     }
-    ui->clearButton->setIcon(platformStyle->SingleColorIcon(":/icons/remove"));
+    // The shipped glyphs are opaque black plates. Tint would keep a dark square.
+    // Text on the parchment tool buttons keeps the same actions and shortcuts.
+    ui->clearButton->setIcon(QIcon());
+    ui->clearButton->setText(QStringLiteral("\u00D7"));
 
-    ui->fontBiggerButton->setIcon(platformStyle->SingleColorIcon(":/icons/fontbigger"));
+    ui->fontBiggerButton->setIcon(QIcon());
+    ui->fontBiggerButton->setText(QStringLiteral("A+"));
     //: Main shortcut to increase the RPC console font size.
     ui->fontBiggerButton->setShortcut(tr("Ctrl++"));
     //: Secondary shortcut to increase the RPC console font size.
     GUIUtil::AddButtonShortcut(ui->fontBiggerButton, tr("Ctrl+="));
 
-    ui->fontSmallerButton->setIcon(platformStyle->SingleColorIcon(":/icons/fontsmaller"));
+    ui->fontSmallerButton->setIcon(QIcon());
+    ui->fontSmallerButton->setText(QStringLiteral("A\u2212"));
     //: Main shortcut to decrease the RPC console font size.
     ui->fontSmallerButton->setShortcut(tr("Ctrl+-"));
     //: Secondary shortcut to decrease the RPC console font size.
@@ -871,17 +876,17 @@ void RPCConsole::clear(bool keep_prompt)
 #else
     QFontInfo fixedFontInfo(GUIUtil::fixedPitchFont());
 #endif
-    // Dark console palette — match wallet Send/Receive chrome (readable on #1A1A1D).
+    // Parchment console. Monospace stays; ink is blue-black ballpoint.
     ui->messagesWidget->document()->setDefaultStyleSheet(
         QString(
-                "body { color: #FFFFFF; background-color: #111111; }"
+                "body { color: #26394B; background-color: #E3D1B8; }"
                 "table { }"
-                "td.time { color: #BBBBBB; font-size: %2; padding-top: 3px; } "
-                "td.message { font-family: %1; font-size: %2; white-space:pre-wrap; color: #FFFFFF; } "
-                "td.cmd-request { color: #5EC8C8; } "
-                "td.cmd-error { color: #FF6B6B; } "
-                ".secwarning { color: #FF6B6B; }"
-                "b { color: #FFB86A; } "
+                "td.time { color: #526477; font-size: %2; padding-top: 3px; } "
+                "td.message { font-family: %1; font-size: %2; white-space:pre-wrap; color: #26394B; } "
+                "td.cmd-request { color: #3E5568; } "
+                "td.cmd-error { color: #6A3018; } "
+                ".secwarning { color: #6A3018; }"
+                "b { color: #26394B; } "
             ).arg(fixedFontInfo.family(), QString("%1pt").arg(consoleFontSize))
         );
 
@@ -920,9 +925,12 @@ void RPCConsole::keyPressEvent(QKeyEvent *event)
 void RPCConsole::changeEvent(QEvent* e)
 {
     if (e->type() == QEvent::PaletteChange) {
-        ui->clearButton->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/remove")));
-        ui->fontBiggerButton->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/fontbigger")));
-        ui->fontSmallerButton->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/fontsmaller")));
+        ui->clearButton->setIcon(QIcon());
+        ui->clearButton->setText(QStringLiteral("\u00D7"));
+        ui->fontBiggerButton->setIcon(QIcon());
+        ui->fontBiggerButton->setText(QStringLiteral("A+"));
+        ui->fontSmallerButton->setIcon(QIcon());
+        ui->fontSmallerButton->setText(QStringLiteral("A\u2212"));
         ui->promptIcon->setIcon(platformStyle->SingleColorIcon(QStringLiteral(":/icons/prompticon")));
 
         for (int i = 0; ICON_MAPPING[i].url; ++i) {

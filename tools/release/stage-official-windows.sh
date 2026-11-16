@@ -97,11 +97,13 @@ listen=1
 rpcallowip=127.0.0.1
 EOF
 
+IFS=. read -r vi_a vi_b vi_c vi_d _ <<< "${RELEASE_VERSION}.0.0.0"
 makensis -V2 \
   -DREPO_ROOT="${ROOT}" \
   -DSTAGING_DIR="${PE_STAGING}" \
   -DOUTFILE="${OUT}/${WIN_EXE_NAME}" \
   -DPRODUCT_VERSION="${RELEASE_VERSION}" \
+  -DVI_PRODUCT_VERSION="${vi_a}.${vi_b}.${vi_c}.${vi_d}" \
   "${NSI}"
 
 is_mz "${OUT}/${WIN_EXE_NAME}" || die "NSIS outfile not MZ"

@@ -75,7 +75,7 @@ expect_fail "empty process architecture" \
   macos_resolve_arch "" unknown "" 0 ""
 
 header_ver="$(macos_release_version "${ROOT}")" || exit 1
-check "header display version" "${header_ver}" "0.2.3"
+check "header display version" "${header_ver}" "0.3"
 if RIGOR_RELEASE_VERSION=0.2 macos_release_version "${ROOT}" >/dev/null; then
   echo "FAIL stale RIGOR_RELEASE_VERSION 0.2 was accepted" >&2
   fail=1

@@ -91,7 +91,7 @@ ConvergencePage::ConvergencePage(const PlatformStyle* platformStyle, QWidget* pa
             ui->labelConvergeDisclaimer->setText(tr(
                 "The wallet constructs the mint with a future confirmation-height safety margin so waiting to confirm does not void it.\n"
                 "Destroyed ORU cannot be recovered."));
-            ui->labelConvergeDisclaimer->setStyleSheet(QStringLiteral("color: #FFFFFF; font-size: 13px;"));
+            ui->labelConvergeDisclaimer->setStyleSheet(QStringLiteral("color: #526477; font-size: 13px;"));
             ui->verticalLayoutConvergeScroll->insertWidget(3, ui->labelConvergeDisclaimer);
         }
         ui->verticalLayoutConvergeScroll->addStretch(1);
@@ -172,7 +172,9 @@ void ConvergencePage::applyConvergenceTheme()
     setObjectName(QStringLiteral("ConvergencePageRoot"));
     setStyleSheet(QStringLiteral(
         "QWidget#ConvergencePageRoot {"
-        "  background: %1;"
+        "  background-color: %1;"
+        "  background-image: url(:/images/paper_grain);"
+        "  background-repeat: repeat;"
         "  color: %2;"
         "  font-family: %9;"
         "}"
@@ -206,7 +208,7 @@ void ConvergencePage::applyConvergenceTheme()
         "QWidget#ConvergencePageRoot QLabel#labelQuadraticFeeTitle,"
         "QWidget#ConvergencePageRoot QLabel#labelTotalDeductionTitle { color: %5; }"
         "QWidget#ConvergencePageRoot QLabel#labelRoundNarrative { color: %5; font-size: 11px; }"
-        "QWidget#ConvergencePageRoot QLabel#labelConvergeDisclaimer { color: #FFFFFF; font-size: 13px; }"
+        "QWidget#ConvergencePageRoot QLabel#labelConvergeDisclaimer { color: %5; font-size: 13px; }"
         "QWidget#ConvergencePageRoot QLabel#labelTipRoundHeightTitle,"
         "QWidget#ConvergencePageRoot QLabel#labelTipRoundNTitle,"
         "QWidget#ConvergencePageRoot QLabel#labelTipRoundYouTitle,"
@@ -223,7 +225,7 @@ void ConvergencePage::applyConvergenceTheme()
         "QWidget#ConvergencePageRoot QLabel#labelConvergeUnavailable { color: %2; padding: 12px; background: %3; border: 1px solid %4; border-radius: 8px; }"
         "QWidget#ConvergencePageRoot QPushButton#pushButtonConverge {"
         "  background-color: %7;"
-        "  color: #FFFFFF;"
+        "  color: #F4E8D6;"
         "  font-weight: 600;"
         "  border: none;"
         "  border-radius: 6px;"
@@ -442,7 +444,7 @@ void ConvergencePage::updateConvergenceRoundPanels()
         if (walletModel) {
             if (r.is_mine) {
                 you_l->setText(tr("Yes — your convergence transaction is in this block."));
-                you_l->setStyleSheet(QStringLiteral("QLabel { color: #8CD892; font-weight: 600; }"));
+                you_l->setStyleSheet(QStringLiteral("QLabel { color: #2E4A32; font-weight: 600; }"));
             } else {
                 ClearHighlight(you_l);
                 you_l->setText(tr("No"));

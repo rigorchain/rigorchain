@@ -47,12 +47,20 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDoubleValidator>
+#include <functional>
+
 #include <QFileDialog>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontMetrics>
+#include <QHBoxLayout>
 #include <QGuiApplication>
+#include <QLabel>
 #include <QMainWindow>
+#include <QMenuBar>
+#include <QToolButton>
+#include <QVBoxLayout>
+#include <QWindow>
 #include <QPalette>
 #include <QJsonObject>
 #include <QKeyEvent>
@@ -1302,92 +1310,95 @@ void ShowModalDialogAsynchronously(QDialog* dialog)
     dialog->show();
 }
 
-/** Checkbox/radio: grey idle, white fill when checked. Do not rely on SVG images
+/** Checkbox/radio: paper idle, ink fill when checked. Do not rely on SVG images
  *  (Windows native style / static Qt often drops QSS `image:` and only draws a ring). */
 static QString RigorCheckIndicatorStylesheet(const QString& selector_prefix)
 {
     return QStringLiteral(
         "%1QCheckBox, %1QRadioButton {"
-        "  color: #FFFFFF; spacing: 6px; background: transparent;"
+        "  color: #26394B; spacing: 6px; background: transparent;"
         "}"
-        "%1QCheckBox:disabled, %1QRadioButton:disabled { color: #888888; }"
+        "%1QCheckBox:disabled, %1QRadioButton:disabled { color: #7A8794; }"
         "%1QCheckBox::indicator, %1QRadioButton::indicator {"
         "  width: 18px; height: 18px;"
-        "  border: 2px solid #888888;"
-        "  background-color: #3D3D3D;"
+        "  border: 2px solid #8A7E6C;"
+        "  background-color: #F3E6D0;"
         "}"
         "%1QCheckBox::indicator { border-radius: 3px; }"
         "%1QRadioButton::indicator { border-radius: 9px; }"
         "%1QCheckBox::indicator:checked {"
-        "  background-color: #FFFFFF;"
-        "  border: 2px solid #FFFFFF;"
+        "  background-color: #26394B;"
+        "  border: 2px solid #26394B;"
         "  image: none;"
         "}"
         "%1QRadioButton::indicator:checked {"
-        "  background-color: #FFFFFF;"
-        "  border: 2px solid #FFFFFF;"
+        "  background-color: #26394B;"
+        "  border: 2px solid #26394B;"
         "  image: none;"
         "}"
         "%1QCheckBox::indicator:unchecked, %1QRadioButton::indicator:unchecked {"
-        "  background-color: #3D3D3D;"
-        "  border: 2px solid #888888;"
+        "  background-color: #F3E6D0;"
+        "  border: 2px solid #8A7E6C;"
         "  image: none;"
         "}"
         "%1QCheckBox::indicator:disabled, %1QRadioButton::indicator:disabled {"
-        "  background-color: #2A2A2A; border: 2px solid #444444; image: none;"
+        "  background-color: #E4D5BE; border: 2px solid #C4B49C; image: none;"
         "}"
     ).arg(selector_prefix);
 }
 
-/** Grey input surface + white text for every editable field. */
+/** Warm field surface and blue-black ink for every editable field. */
 static QString RigorEditableFieldStylesheet(const QString& selector_prefix, const QString& ui_font)
 {
     return QStringLiteral(
         "%1QLineEdit, %1QPlainTextEdit, %1QTextEdit, %1QSpinBox, %1QDoubleSpinBox,"
         "%1QAbstractSpinBox, %1QAbstractSpinBox QLineEdit, %1QComboBox, %1QDateTimeEdit {"
-        "  background-color: #3D3D3D;"
-        "  color: #FFFFFF;"
-        "  border: 1px solid #666666;"
+        "  background-color: #F3E6D0;"
+        "  color: #26394B;"
+        "  border: 1px solid #8A7E6C;"
         "  border-radius: 4px;"
         "  padding: 4px 6px;"
-        "  selection-background-color: #555555;"
-        "  selection-color: #FFFFFF;"
+        "  selection-background-color: #C4B398;"
+        "  selection-color: #26394B;"
         "  font-family: %2;"
         "}"
+        "%1QLineEdit:focus, %1QPlainTextEdit:focus, %1QTextEdit:focus, %1QSpinBox:focus,"
+        "%1QComboBox:focus, %1QAbstractSpinBox:focus {"
+        "  border: 1px solid #26394B;"
+        "}"
         "%1QLineEdit:disabled, %1QComboBox:disabled, %1QSpinBox:disabled, %1QAbstractSpinBox:disabled {"
-        "  background-color: #2A2A2A;"
-        "  color: #888888;"
-        "  border: 1px solid #444444;"
+        "  background-color: #E4D5BE;"
+        "  color: #7A8794;"
+        "  border: 1px solid #C4B49C;"
         "}"
     ).arg(selector_prefix, ui_font);
 }
 
 QString RigorDialogControlStylesheet()
 {
-    // Page remains #000; editable fields are grey (#3D3D3D) with white text.
     const QString ui_font = UiFontFamilyCss();
     return QStringLiteral(
         "QDialog, QMessageBox {"
-        "  background-color: #000000; color: #FFFFFF; font-family: %1;"
+        "  background-color: #E3D1B8; color: #26394B; font-family: %1;"
         "}"
-        "QDialog QWidget { background-color: #000000; color: #FFFFFF; }"
-        "QDialog QLabel, QMessageBox QLabel { color: #FFFFFF; background: transparent; font-family: %1; }"
+        "QDialog QWidget { background-color: #E3D1B8; color: #26394B; }"
+        "QDialog QLabel, QMessageBox QLabel { color: #26394B; background: transparent; font-family: %1; }"
         "QDialog QGroupBox {"
-        "  color: #FFFFFF; background-color: #111111; border: 1px solid #333333;"
+        "  color: #26394B; background-color: #EADCC6; border: 1px solid #8A7E6C;"
         "  margin-top: 8px; padding-top: 8px; font-family: %1;"
         "}"
-        "QDialog QGroupBox::title { color: #FFFFFF; subcontrol-origin: margin; left: 8px; }"
+        "QDialog QGroupBox::title { color: #26394B; subcontrol-origin: margin; left: 8px; }"
         "QDialog QTabWidget::pane {"
-        "  background-color: #000000; border: 1px solid #333333; top: -1px;"
+        "  background-color: #E3D1B8; border: 1px solid #8A7E6C; top: -1px;"
         "}"
         "QDialog QTabBar::tab {"
-        "  background: #111111; color: #BBBBBB; border: 1px solid #333333;"
+        "  background: #EADCC6; color: #526477; border: 1px solid #8A7E6C;"
         "  padding: 6px 12px; margin-right: 2px; font-family: %1;"
         "}"
-        "QDialog QTabBar::tab:selected { background: #222222; color: #FFFFFF; }"
-        "QDialog QTabBar::tab:hover:!selected { background: #222222; color: #FFFFFF; }"
-        "QDialog QScrollArea, QDialog QAbstractScrollArea, QDialog QFrame {"
-        "  background-color: #000000; color: #FFFFFF; border: none;"
+        "QDialog QTabBar::tab:selected { background: #C4B398; color: #26394B; }"
+        "QDialog QTabBar::tab:hover:!selected { background: #DDD0B8; color: #26394B; }"
+        "QDialog QScrollArea, QDialog QAbstractScrollArea {"
+        "  background-color: #E3D1B8; color: #26394B; border: none;"
         "}"
     ).arg(ui_font)
     + RigorCheckIndicatorStylesheet(QStringLiteral("QDialog "))
@@ -1395,22 +1406,22 @@ QString RigorDialogControlStylesheet()
     + QStringLiteral(
         "QDialog QComboBox::drop-down { border: none; width: 20px; background: transparent; }"
         "QDialog QComboBox QAbstractItemView {"
-        "  background-color: #3D3D3D; color: #FFFFFF;"
-        "  selection-background-color: #555555; selection-color: #FFFFFF;"
+        "  background-color: #F3E6D0; color: #26394B;"
+        "  selection-background-color: #C4B398; selection-color: #26394B;"
         "  font-family: %1;"
         "}"
         "QDialog QListView, QDialog QTreeView, QDialog QTableView {"
-        "  background-color: #111111; alternate-background-color: #000000; color: #FFFFFF;"
-        "  border: 1px solid #333333; gridline-color: #333333;"
-        "  selection-background-color: #333333; selection-color: #FFFFFF;"
+        "  background-color: #F3E6D0; alternate-background-color: #EAD9C1; color: #26394B;"
+        "  border: 1px solid #8A7E6C; gridline-color: #B6A58C;"
+        "  selection-background-color: #C4B398; selection-color: #26394B;"
         "}"
         "QDialog QHeaderView::section {"
-        "  background: #111111; color: #FFFFFF; border: 1px solid #333333; padding: 4px;"
+        "  background: #EADCC6; color: #26394B; border: 1px solid #8A7E6C; padding: 4px;"
         "}"
         "QDialog QPushButton, QMessageBox QPushButton {"
-        "  background-color: #111111;"
-        "  color: #FFFFFF;"
-        "  border: 1px solid #444444;"
+        "  background-color: #EADCC6;"
+        "  color: #26394B;"
+        "  border: 1px solid #8A7E6C;"
         "  border-radius: 4px;"
         "  padding: 6px 16px;"
         "  min-height: 26px;"
@@ -1418,21 +1429,253 @@ QString RigorDialogControlStylesheet()
         "  font-family: %1;"
         "}"
         "QDialog QPushButton:hover:!disabled, QMessageBox QPushButton:hover:!disabled {"
-        "  background-color: #222222; color: #FFFFFF;"
+        "  background-color: #DDD0B8; color: #26394B;"
         "}"
-        "QDialog QPushButton:pressed { background-color: #000000; }"
+        "QDialog QPushButton:pressed { background-color: #C4B398; }"
         "QDialog QPushButton:disabled, QMessageBox QPushButton:disabled {"
-        "  background-color: #000000;"
-        "  color: #888888;"
-        "  border: 1px solid #333333;"
+        "  background-color: #E4D5BE;"
+        "  color: #7A8794;"
+        "  border: 1px solid #C4B49C;"
         "}"
-        "QDialog QPushButton:default { border: 2px solid #FFFFFF; font-weight: 600; }"
+        "QDialog QPushButton:default { border: 2px solid #26394B; font-weight: 600; }"
         "QDialog QDialogButtonBox QPushButton { min-width: 88px; }"
-        "QDialog QScrollBar:vertical { background: #000000; width: 12px; }"
-        "QDialog QScrollBar::handle:vertical { background: #444444; min-height: 20px; border-radius: 4px; }"
-        "QDialog QScrollBar:horizontal { background: #000000; height: 12px; }"
-        "QDialog QScrollBar::handle:horizontal { background: #444444; min-width: 20px; border-radius: 4px; }"
+        "QDialog QScrollBar:vertical { background: #E3D1B8; width: 12px; }"
+        "QDialog QScrollBar::handle:vertical { background: #8A7E6C; min-height: 20px; border-radius: 4px; }"
+        "QDialog QScrollBar:horizontal { background: #E3D1B8; height: 12px; }"
+        "QDialog QScrollBar::handle:horizontal { background: #8A7E6C; min-width: 20px; border-radius: 4px; }"
     ).arg(ui_font);
+}
+
+void ApplyRigorNativeCaption(QWidget* widget)
+{
+    if (!widget) return;
+#ifdef WIN32
+    widget->winId();
+    HWND hwnd = reinterpret_cast<HWND>(widget->winId());
+    if (!hwnd) return;
+    HMODULE lib = GetModuleHandleW(L"dwmapi.dll");
+    if (!lib) lib = LoadLibraryW(L"dwmapi.dll");
+    if (!lib) return;
+    using SetAttrFn = HRESULT (WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    auto set_attr = reinterpret_cast<SetAttrFn>(GetProcAddress(lib, "DwmSetWindowAttribute"));
+    if (!set_attr) return;
+    // Windows 11 22000+. Windows 10 returns an error and keeps the system caption.
+    const COLORREF caption = RGB(0xD8, 0xC5, 0xA8);
+    const COLORREF text = RGB(0x26, 0x39, 0x4B);
+    constexpr DWORD DWMWA_CAPTION_COLOR = 35;
+    constexpr DWORD DWMWA_TEXT_COLOR = 36;
+    set_attr(hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+    set_attr(hwnd, DWMWA_TEXT_COLOR, &text, sizeof(text));
+#else
+    Q_UNUSED(widget);
+#endif
+}
+
+namespace {
+
+class RigorEdgeHandle : public QWidget
+{
+public:
+    RigorEdgeHandle(QWidget* window, Qt::Edges edges, QWidget* parent)
+        : QWidget(parent), m_window(window), m_edges(edges)
+    {
+        setStyleSheet(QStringLiteral("background: transparent;"));
+        if (edges == Qt::LeftEdge || edges == Qt::RightEdge) setCursor(Qt::SizeHorCursor);
+        else if (edges == Qt::TopEdge || edges == Qt::BottomEdge) setCursor(Qt::SizeVerCursor);
+        else if (edges == (Qt::TopEdge | Qt::LeftEdge) || edges == (Qt::BottomEdge | Qt::RightEdge)) setCursor(Qt::SizeFDiagCursor);
+        else setCursor(Qt::SizeBDiagCursor);
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton && m_window->windowHandle() && !m_window->isMaximized()) {
+            m_window->windowHandle()->startSystemResize(m_edges);
+        } else {
+            QWidget::mousePressEvent(event);
+        }
+    }
+
+private:
+    QWidget* m_window;
+    Qt::Edges m_edges;
+};
+
+class RigorCaptionBar : public QWidget
+{
+public:
+    RigorCaptionBar(QWidget* window, QWidget* parent)
+        : QWidget(parent), m_window(window)
+    {
+        setObjectName(QStringLiteral("RigorCaptionBar"));
+        setFixedHeight(32);
+        setStyleSheet(QStringLiteral(
+            "QWidget#RigorCaptionBar { background: #E3D1B8; border-bottom: 1px solid #8A7E6C; }"
+            "QLabel { background: transparent; color: #26394B; }"));
+        auto* lay = new QHBoxLayout(this);
+        lay->setContentsMargins(10, 0, 0, 0);
+        lay->setSpacing(0);
+        m_icon = new QLabel(this);
+        m_icon->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_title = new QLabel(window->windowTitle(), this);
+        m_title->setAttribute(Qt::WA_TransparentForMouseEvents);
+        lay->addWidget(m_icon);
+        lay->addSpacing(8);
+        lay->addWidget(m_title, 1);
+        m_min = makeButton(QStringLiteral("–"));
+        m_max = makeButton(QStringLiteral("□"));
+        m_close = makeButton(QStringLiteral("×"));
+        m_close->setStyleSheet(QStringLiteral(
+            "QToolButton { background: #E3D1B8; color: #26394B; border: none; padding: 0 14px; }"
+            "QToolButton:hover { background: #6A3018; color: #F4E8D6; }"));
+        lay->addWidget(m_min);
+        lay->addWidget(m_max);
+        lay->addWidget(m_close);
+        connect(m_min, &QToolButton::clicked, window, &QWidget::showMinimized);
+        connect(m_max, &QToolButton::clicked, window, [this] { toggleMaximized(); });
+        connect(m_close, &QToolButton::clicked, window, &QWidget::close);
+        connect(window, &QWidget::windowTitleChanged, m_title, &QLabel::setText);
+        connect(window, &QWidget::windowIconChanged, this, [this](const QIcon&) { refreshIcon(); });
+        refreshIcon();
+    }
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        if (event->button() != Qt::LeftButton || !m_window->windowHandle()) {
+            QWidget::mousePressEvent(event);
+            return;
+        }
+        const int edge = 6;
+        Qt::Edges edges;
+        if (event->pos().y() <= edge) edges |= Qt::TopEdge;
+        if (event->pos().x() <= edge) edges |= Qt::LeftEdge;
+        if (event->pos().x() >= width() - edge) edges |= Qt::RightEdge;
+        if (edges && !m_window->isMaximized()) m_window->windowHandle()->startSystemResize(edges);
+        else m_window->windowHandle()->startSystemMove();
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override
+    {
+        if (event->button() == Qt::LeftButton) toggleMaximized();
+        else QWidget::mouseDoubleClickEvent(event);
+    }
+
+private:
+    QToolButton* makeButton(const QString& text)
+    {
+        auto* button = new QToolButton(this);
+        button->setText(text);
+        button->setAutoRaise(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setCursor(Qt::ArrowCursor);
+        button->setStyleSheet(QStringLiteral(
+            "QToolButton { background: #E3D1B8; color: #26394B; border: none; padding: 0 12px; }"
+            "QToolButton:hover { background: #C4B398; }"));
+        return button;
+    }
+
+    void toggleMaximized()
+    {
+        if (m_window->isMaximized()) m_window->showNormal();
+        else m_window->showMaximized();
+    }
+
+    void refreshIcon()
+    {
+        const QIcon icon = m_window->windowIcon();
+        if (icon.isNull()) {
+            m_icon->clear();
+            return;
+        }
+        m_icon->setPixmap(icon.pixmap(16, 16));
+    }
+
+    QWidget* m_window;
+    QLabel* m_icon;
+    QLabel* m_title;
+    QToolButton* m_min;
+    QToolButton* m_max;
+    QToolButton* m_close;
+};
+
+class RigorCaptionFilter : public QObject
+{
+public:
+    RigorCaptionFilter(QWidget* window, std::function<void()> place)
+        : QObject(window), m_window(window), m_place(std::move(place)) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if (watched == m_window && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+            m_place();
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QWidget* m_window;
+    std::function<void()> m_place;
+};
+
+} // namespace
+
+void InstallRigorParchmentCaption(QWidget* window)
+{
+    if (!window || !window->isWindow() || window->property("rigorCaption").toBool()) return;
+    window->setProperty("rigorCaption", true);
+    window->setWindowFlag(Qt::FramelessWindowHint, true);
+
+    auto* bar = new RigorCaptionBar(window, window);
+    if (auto* main_window = qobject_cast<QMainWindow*>(window)) {
+        // Keep the existing menu bar object. setMenuWidget() would delete it and
+        // leave the window-menu actions dangling.
+        QMenuBar* menu = qobject_cast<QMenuBar*>(main_window->menuWidget());
+        if (QLayout* layout = main_window->layout()) layout->setMenuBar(nullptr);
+        auto* wrap = new QWidget(main_window);
+        wrap->setObjectName(QStringLiteral("RigorMenuWrap"));
+        wrap->setStyleSheet(QStringLiteral("QWidget#RigorMenuWrap { background: #E3D1B8; }"));
+        auto* column = new QVBoxLayout(wrap);
+        column->setContentsMargins(0, 0, 0, 0);
+        column->setSpacing(0);
+        bar->setParent(wrap);
+        column->addWidget(bar);
+        if (menu) {
+            menu->setParent(wrap);
+            menu->show();
+            column->addWidget(menu);
+        }
+        main_window->setMenuWidget(wrap);
+    } else if (QLayout* layout = window->layout()) {
+        const QMargins layout_margins = layout->contentsMargins();
+        layout->setContentsMargins(layout_margins.left(), layout_margins.top() + bar->height(), layout_margins.right(), layout_margins.bottom());
+    } else {
+        const QMargins margins = window->contentsMargins();
+        window->setContentsMargins(margins.left(), margins.top() + bar->height(), margins.right(), margins.bottom());
+    }
+
+    const int thickness = 5;
+    auto* left = new RigorEdgeHandle(window, Qt::LeftEdge, window);
+    auto* right = new RigorEdgeHandle(window, Qt::RightEdge, window);
+    auto* bottom = new RigorEdgeHandle(window, Qt::BottomEdge, window);
+    auto place = [window, bar, left, right, bottom, thickness] {
+        if (bar->parentWidget() == window) {
+            bar->setGeometry(0, 0, window->width(), bar->height());
+        }
+        const int w = window->width();
+        const int h = window->height();
+        const int top = bar->height();
+        left->setGeometry(0, top, thickness, qMax(0, h - top - thickness));
+        right->setGeometry(qMax(0, w - thickness), top, thickness, qMax(0, h - top - thickness));
+        bottom->setGeometry(0, qMax(0, h - thickness), w, thickness);
+        left->raise();
+        right->raise();
+        bottom->raise();
+        bar->raise();
+    };
+    place();
+    window->installEventFilter(new RigorCaptionFilter(window, std::function<void()>(place)));
 }
 
 void ApplyRigorDialogChrome(QWidget* dialog)
@@ -1440,16 +1683,20 @@ void ApplyRigorDialogChrome(QWidget* dialog)
     if (!dialog) return;
     dialog->setAutoFillBackground(true);
     QPalette pal = dialog->palette();
-    pal.setColor(QPalette::Window, QColor(QStringLiteral("#000000")));
-    pal.setColor(QPalette::WindowText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Button, QColor(QStringLiteral("#111111")));
-    pal.setColor(QPalette::ButtonText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Base, QColor(QStringLiteral("#3D3D3D")));
-    pal.setColor(QPalette::Text, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#888888")));
-    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(QStringLiteral("#888888")));
+    pal.setColor(QPalette::Window, QColor(QStringLiteral("#E3D1B8")));
+    pal.setColor(QPalette::WindowText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Button, QColor(QStringLiteral("#EADCC6")));
+    pal.setColor(QPalette::ButtonText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Base, QColor(QStringLiteral("#F3E6D0")));
+    pal.setColor(QPalette::Text, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Highlight, QColor(QStringLiteral("#C4B398")));
+    pal.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#7A8794")));
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(QStringLiteral("#7A8794")));
     dialog->setPalette(pal);
     dialog->setStyleSheet(RigorDialogControlStylesheet());
+    ApplyRigorNativeCaption(dialog);
+    InstallRigorParchmentCaption(dialog);
 }
 
 void ApplyRigorWalletChrome(QMainWindow* mainWindow, QWidget* walletFrame, QWidget* rpcConsole)
@@ -1457,80 +1704,119 @@ void ApplyRigorWalletChrome(QMainWindow* mainWindow, QWidget* walletFrame, QWidg
     if (!mainWindow) return;
 
     QPalette pal = QGuiApplication::palette();
-    pal.setColor(QPalette::Window, QColor(QStringLiteral("#000000")));
-    pal.setColor(QPalette::WindowText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Base, QColor(QStringLiteral("#3D3D3D")));
-    pal.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#000000")));
-    pal.setColor(QPalette::Text, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Button, QColor(QStringLiteral("#111111")));
-    pal.setColor(QPalette::ButtonText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Highlight, QColor(QStringLiteral("#333333")));
-    pal.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::Link, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#111111")));
-    pal.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#FFFFFF")));
-    pal.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#888888")));
-    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(QStringLiteral("#888888")));
-    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#888888")));
-    pal.setColor(QPalette::Disabled, QPalette::WindowText, QColor(QStringLiteral("#888888")));
+    pal.setColor(QPalette::Window, QColor(QStringLiteral("#E3D1B8")));
+    pal.setColor(QPalette::WindowText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Base, QColor(QStringLiteral("#F3E6D0")));
+    pal.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#EAD9C1")));
+    pal.setColor(QPalette::Text, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Button, QColor(QStringLiteral("#EADCC6")));
+    pal.setColor(QPalette::ButtonText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Highlight, QColor(QStringLiteral("#C4B398")));
+    pal.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::Link, QColor(QStringLiteral("#3E5568")));
+    pal.setColor(QPalette::ToolTipBase, QColor(QStringLiteral("#F3E6D0")));
+    pal.setColor(QPalette::ToolTipText, QColor(QStringLiteral("#26394B")));
+    pal.setColor(QPalette::PlaceholderText, QColor(QStringLiteral("#7A8794")));
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(QStringLiteral("#7A8794")));
+    pal.setColor(QPalette::Disabled, QPalette::Text, QColor(QStringLiteral("#7A8794")));
+    pal.setColor(QPalette::Disabled, QPalette::WindowText, QColor(QStringLiteral("#7A8794")));
     QApplication::setPalette(pal);
 
     qApp->setStyleSheet(RigorDialogControlStylesheet());
+    ApplyRigorNativeCaption(mainWindow);
+    ApplyRigorNativeCaption(rpcConsole);
+    InstallRigorParchmentCaption(mainWindow);
+    if (rpcConsole && rpcConsole->isWindow()) InstallRigorParchmentCaption(rpcConsole);
 
     mainWindow->setObjectName(QStringLiteral("RigorMainWindow"));
     const QString ui_font = UiFontFamilyCss();
     mainWindow->setStyleSheet(QStringLiteral(
         "QMainWindow#RigorMainWindow {"
-        "  background: #000000;"
-        "  color: #FFFFFF;"
+        "  background-color: #E3D1B8;"
+        "  background-image: url(:/images/paper_grain);"
+        "  background-repeat: repeat;"
+        "  color: #26394B;"
         "  font-family: %1;"
         "}"
-        "QMenuBar { background-color: #111111; color: #FFFFFF; border-bottom: 1px solid #333333; font-family: %1; }"
-        "QMenuBar::item:selected { background: #222222; }"
-        "QMenu { background-color: #111111; color: #FFFFFF; border: 1px solid #333333; font-family: %1; }"
-        "QMenu::item:selected { background: #222222; }"
-        "QToolBar { background-color: #111111; border: none; spacing: 4px; padding: 2px; }"
-        "QToolButton { color: #FFFFFF; font-family: %1; }"
-        "QStatusBar { background-color: #111111; color: #BBBBBB; border-top: 1px solid #333333; font-family: %1; }"
-        "QProgressBar { border: 1px solid #333333; border-radius: 4px; text-align: center; background: #111111; color: #FFFFFF; }"
-        "QProgressBar::chunk { background-color: #FF6A2B; border-radius: 3px; }"
+        "QMenuBar { background-color: #D8C5A8; color: #26394B; border-bottom: 1px solid #8A7E6C; font-family: %1; }"
+        "QMenuBar::item:selected { background: #C4B398; }"
+        "QMenuBar::item:pressed { background: #C4B398; }"
+        "QMenu { background-color: #D8C5A8; color: #26394B; border: 1px solid #8A7E6C; font-family: %1; }"
+        "QMenu::item:selected { background: #C4B398; color: #26394B; }"
+        "QMenu::item:disabled { color: #7A8794; }"
+        "QMenu::separator { height: 1px; background: #8A7E6C; margin: 4px 8px; }"
+        "QToolBar#RigorNavSidebar {"
+        "  background-color: #D6C3A5;"
+        "  border: none;"
+        "  border-right: 1px solid #8A7E6C;"
+        "  spacing: 2px;"
+        "  padding: 8px 6px;"
+        "}"
+        "QToolBar#RigorNavSidebar::separator { background: #8A7E6C; height: 1px; width: 160px; margin: 8px 10px; }"
+        "QToolBar#RigorNavSidebar QToolButton {"
+        "  color: #26394B;"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  padding: 7px 8px;"
+        "  font-family: %1;"
+        "}"
+        "QToolBar#RigorNavSidebar QToolButton:hover { background: #E4D3B8; }"
+        "QToolBar#RigorNavSidebar QToolButton:checked { background: #C4B398; color: #26394B; font-weight: 600; border-left: 3px solid #79664D; }"
+        "QToolBar#RigorNavSidebar QToolButton:disabled { color: #7A8794; }"
+        "QToolBar#RigorNavSidebar QLabel { color: #526477; background: transparent; padding: 2px 4px 0 4px; font-family: %1; }"
+        "QStatusBar { background-color: #D8C5A8; color: #26394B; border-top: 1px solid #8A7E6C; font-family: %1; }"
+        "QStatusBar QLabel { color: #26394B; background: transparent; }"
+        "QProgressBar { border: 1px solid #8A7E6C; border-radius: 4px; text-align: center; background: #F3E6D0; color: #26394B; }"
+        "QProgressBar::chunk { background-color: #6A3018; border-radius: 3px; }"
         "QPushButton {"
-        "  background-color: #111111; color: #FFFFFF; border: 1px solid #444444;"
+        "  background-color: #D8C5A8; color: #26394B; border: 1px solid #8A7E6C;"
         "  border-radius: 4px; padding: 6px 14px; min-height: 24px; font-family: %1;"
         "}"
-        "QPushButton:hover:!disabled { background-color: #222222; color: #FFFFFF; }"
-        "QPushButton:disabled { background-color: #000000; color: #888888; border: 1px solid #333333; }"
-        "QPushButton:default { border: 2px solid #FFFFFF; }"
+        "QPushButton:hover:!disabled { background-color: #C4B398; color: #26394B; }"
+        "QPushButton:pressed { background-color: #B8A486; }"
+        "QPushButton:disabled { background-color: #E4D5BE; color: #7A8794; border: 1px solid #C4B49C; }"
+        "QPushButton:default { border: 2px solid #26394B; }"
+        "QToolTip { background-color: #F3E6D0; color: #26394B; border: 1px solid #8A7E6C; }"
         "QDialog, QDialog QLabel, QDialog QTabBar::tab, QDialog QCheckBox, QDialog QGroupBox,"
         "QDialog QComboBox, QDialog QLineEdit { font-family: %1; }"
     ).arg(ui_font));
 
     const QString wallet_ss = QStringLiteral(
-        "QWidget#RigorWalletFrame { background: transparent; color: #FFFFFF; font-family: %1; }"
+        "QWidget#RigorWalletFrame {"
+        "  background-color: #E3D1B8;"
+        "  background-image: url(:/images/paper_grain);"
+        "  background-repeat: repeat;"
+        "  color: #26394B;"
+        "  font-family: %1;"
+        "}"
         "QStackedWidget { background: transparent; }"
-        "QLabel { color: #FFFFFF; font-family: %1; }"
-        "QCheckBox { color: #FFFFFF; font-family: %1; }"
-        "QRadioButton { color: #FFFFFF; font-family: %1; }"
-        "QGroupBox { color: #FFFFFF; background: #111111; border: 1px solid #333333; margin-top: 8px; font-family: %1; }"
-        "QAbstractItemView { background: #111111; alternate-background-color: #000000; color: #FFFFFF; "
-        "  gridline-color: #333333; selection-background-color: #333333; selection-color: #FFFFFF; font-family: %1; }"
-        "QHeaderView::section { background: #111111; color: #FFFFFF; border: 1px solid #333333; }"
+        "QLabel { color: #26394B; font-family: %1; }"
+        "QCheckBox { color: #26394B; font-family: %1; }"
+        "QRadioButton { color: #26394B; font-family: %1; }"
+        "QGroupBox { color: #26394B; background: #EADCC6; border: 1px solid #8A7E6C; margin-top: 8px; font-family: %1; }"
+        "QGroupBox::title { color: #26394B; }"
+        "QAbstractItemView { background: #F3E6D0; alternate-background-color: #EAD9C1; color: #26394B; "
+        "  gridline-color: #B6A58C; selection-background-color: #C4B398; selection-color: #26394B; font-family: %1; }"
+        "QHeaderView::section { background: #EADCC6; color: #26394B; border: 1px solid #8A7E6C; padding: 4px; }"
         "QComboBox::drop-down { border: none; }"
-        "QComboBox QAbstractItemView { background: #3D3D3D; color: #FFFFFF; "
-        "  selection-background-color: #555555; selection-color: #FFFFFF; font-family: %1; }"
-        "QTabWidget::pane { border: 1px solid #333333; background: #000000; }"
-        "QTabBar::tab { background: #111111; color: #BBBBBB; border: 1px solid #333333; padding: 6px 12px; font-family: %1; }"
-        "QTabBar::tab:selected { background: #222222; color: #FFFFFF; }"
+        "QComboBox QAbstractItemView { background: #F3E6D0; color: #26394B; "
+        "  selection-background-color: #C4B398; selection-color: #26394B; font-family: %1; }"
+        "QTabWidget::pane { border: 1px solid #8A7E6C; background: #E3D1B8; }"
+        "QTabBar::tab { background: #EADCC6; color: #526477; border: 1px solid #8A7E6C; padding: 6px 12px; font-family: %1; }"
+        "QTabBar::tab:selected { background: #C4B398; color: #26394B; }"
+        "QTabBar::tab:hover:!selected { background: #DDD0B8; color: #26394B; }"
         "QPushButton {"
-        "  background-color: #111111; color: #FFFFFF; border: 1px solid #444444;"
+        "  background-color: #D8C5A8; color: #26394B; border: 1px solid #8A7E6C;"
         "  border-radius: 4px; padding: 6px 14px; min-height: 24px; font-family: %1;"
         "}"
-        "QPushButton:hover:!disabled { background-color: #222222; color: #FFFFFF; }"
-        "QPushButton:disabled { background-color: #000000; color: #888888; border: 1px solid #333333; }"
-        "QScrollBar:vertical { background: #000000; width: 12px; }"
-        "QScrollBar::handle:vertical { background: #444444; min-height: 20px; border-radius: 4px; }"
-        "QScrollBar:horizontal { background: #000000; height: 12px; }"
-        "QScrollBar::handle:horizontal { background: #444444; min-width: 20px; border-radius: 4px; }"
+        "QPushButton:hover:!disabled { background-color: #C4B398; color: #26394B; }"
+        "QPushButton:pressed { background-color: #B8A486; }"
+        "QPushButton:disabled { background-color: #E4D5BE; color: #7A8794; border: 1px solid #C4B49C; }"
+        "QScrollBar:vertical { background: #E3D1B8; width: 12px; }"
+        "QScrollBar::handle:vertical { background: #8A7E6C; min-height: 20px; border-radius: 4px; }"
+        "QScrollBar:horizontal { background: #E3D1B8; height: 12px; }"
+        "QScrollBar::handle:horizontal { background: #8A7E6C; min-width: 20px; border-radius: 4px; }"
     ).arg(ui_font)
     + RigorCheckIndicatorStylesheet(QString())
     + RigorEditableFieldStylesheet(QString(), ui_font);
@@ -1540,33 +1826,47 @@ void ApplyRigorWalletChrome(QMainWindow* mainWindow, QWidget* walletFrame, QWidg
 
     const QString rpc_ss = QStringLiteral(
         "QWidget#RigorRpcConsole {"
-        "  background: #000000;"
-        "  color: #FFFFFF;"
+        "  background-color: #E3D1B8;"
+        "  color: #26394B;"
         "}"
-        "QWidget#RigorRpcConsole QWidget { background: transparent; color: #FFFFFF; }"
-        "QWidget#RigorRpcConsole QLabel { color: #FFFFFF; background: transparent; }"
-        "QWidget#RigorRpcConsole QGroupBox { color: #FFFFFF; background: #111111; border: 1px solid #333333; margin-top: 8px; }"
+        "QWidget#RigorRpcConsole QWidget { background: transparent; color: #26394B; }"
+        "QWidget#RigorRpcConsole QLabel { color: #26394B; background: transparent; }"
+        "QWidget#RigorRpcConsole QGroupBox { color: #26394B; background: #EADCC6; border: 1px solid #8A7E6C; margin-top: 8px; }"
         "QWidget#RigorRpcConsole QTableView, QWidget#RigorRpcConsole QTreeWidget, QWidget#RigorRpcConsole QListWidget {"
-        "  background: #111111; alternate-background-color: #000000; color: #FFFFFF; "
-        "  gridline-color: #333333; selection-background-color: #333333; selection-color: #FFFFFF;"
-        "  border: 1px solid #333333;"
+        "  background: #F3E6D0; alternate-background-color: #EAD9C1; color: #26394B; "
+        "  gridline-color: #B6A58C; selection-background-color: #C4B398; selection-color: #26394B;"
+        "  border: 1px solid #8A7E6C;"
         "}"
-        "QWidget#RigorRpcConsole QHeaderView::section { background: #111111; color: #FFFFFF; border: 1px solid #333333; }"
-        "QWidget#RigorRpcConsole QLineEdit, QWidget#RigorRpcConsole QTextEdit, QWidget#RigorRpcConsole QPlainTextEdit,"
-        "QWidget#RigorRpcConsole QSpinBox, QWidget#RigorRpcConsole QAbstractSpinBox, QWidget#RigorRpcConsole QComboBox {"
-        "  background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #666666; border-radius: 4px; padding: 4px;"
-        "  selection-background-color: #555555; selection-color: #FFFFFF;"
+        "QWidget#RigorRpcConsole QHeaderView::section { background: #EADCC6; color: #26394B; border: 1px solid #8A7E6C; }"
+        "QWidget#RigorRpcConsole QTextEdit, QWidget#RigorRpcConsole QPlainTextEdit {"
+        "  background-color: #E3D1B8; color: #26394B; border: 1px solid #8A7E6C; border-radius: 4px;"
+        "  selection-background-color: #C4B398; selection-color: #26394B;"
+        "  font-family: \"Roboto Mono\", Consolas, monospace;"
         "}"
-        "QWidget#RigorRpcConsole QTabWidget::pane { border: 1px solid #333333; background: #000000; }"
-        "QWidget#RigorRpcConsole QTabBar::tab { background: #111111; color: #BBBBBB; border: 1px solid #333333; padding: 6px 10px; }"
-        "QWidget#RigorRpcConsole QTabBar::tab:selected { background: #222222; color: #FFFFFF; }"
-        "QWidget#RigorRpcConsole QPushButton {"
-        "  background-color: #111111; color: #FFFFFF; border: 1px solid #444444; border-radius: 4px; padding: 6px 14px;"
+        "QWidget#RigorRpcConsole QLineEdit, QWidget#RigorRpcConsole QSpinBox,"
+        "QWidget#RigorRpcConsole QAbstractSpinBox, QWidget#RigorRpcConsole QComboBox {"
+        "  background-color: #F3E6D0; color: #26394B; border: 1px solid #8A7E6C; border-radius: 4px; padding: 4px;"
+        "  selection-background-color: #C4B398; selection-color: #26394B;"
         "}"
-        "QWidget#RigorRpcConsole QPushButton:hover:!disabled { background-color: #222222; color: #FFFFFF; }"
-        "QWidget#RigorRpcConsole QPushButton:disabled { color: #888888; border: 1px solid #333333; }"
-        "QWidget#RigorRpcConsole QScrollBar:vertical { background: #000000; width: 12px; }"
-        "QWidget#RigorRpcConsole QScrollBar::handle:vertical { background: #444444; min-height: 20px; border-radius: 4px; }"
+        "QWidget#RigorRpcConsole QLineEdit:focus { border: 1px solid #26394B; }"
+        "QWidget#RigorRpcConsole QTabWidget::pane { border: 1px solid #8A7E6C; background: #E3D1B8; }"
+        "QWidget#RigorRpcConsole QTabBar::tab { background: #EADCC6; color: #526477; border: 1px solid #8A7E6C; padding: 6px 10px; }"
+        "QWidget#RigorRpcConsole QTabBar::tab:selected { background: #C4B398; color: #26394B; }"
+        "QWidget#RigorRpcConsole QTabBar::tab:hover:!selected { background: #DDD0B8; color: #26394B; }"
+        "QWidget#RigorRpcConsole QPushButton, QWidget#RigorRpcConsole QToolButton {"
+        "  background-color: #D8C5A8; color: #26394B; border: 1px solid #8A7E6C; border-radius: 4px;"
+        "  padding: 2px; min-width: 32px; min-height: 32px; font-weight: 600;"
+        "}"
+        "QWidget#RigorRpcConsole QToolButton#clearButton { border-radius: 16px; }"
+        "QWidget#RigorRpcConsole QPushButton:hover:!disabled, QWidget#RigorRpcConsole QToolButton:hover {"
+        "  background-color: #C4B398; color: #26394B;"
+        "}"
+        "QWidget#RigorRpcConsole QPushButton:pressed, QWidget#RigorRpcConsole QToolButton:pressed {"
+        "  background-color: #B8A486; color: #26394B;"
+        "}"
+        "QWidget#RigorRpcConsole QPushButton:disabled { color: #7A8794; border: 1px solid #C4B49C; background: #E4D5BE; }"
+        "QWidget#RigorRpcConsole QScrollBar:vertical { background: #E3D1B8; width: 12px; }"
+        "QWidget#RigorRpcConsole QScrollBar::handle:vertical { background: #8A7E6C; min-height: 20px; border-radius: 4px; }"
     );
     if (rpcConsole) {
         rpcConsole->setObjectName(QStringLiteral("RigorRpcConsole"));

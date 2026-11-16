@@ -61,12 +61,12 @@ HelpMessageDialog::HelpMessageDialog(QWidget *parent, bool about) :
         // Read-only help body: dark surface + light text (overrides dialog Base/Text for inputs).
         {
             QPalette help_pal = ui->helpMessage->palette();
-            help_pal.setColor(QPalette::Base, QColor(QStringLiteral("#111111")));
-            help_pal.setColor(QPalette::Text, QColor(QStringLiteral("#FFFFFF")));
+            help_pal.setColor(QPalette::Base, QColor(QStringLiteral("#F3E6D0")));
+            help_pal.setColor(QPalette::Text, QColor(QStringLiteral("#26394B")));
             ui->helpMessage->setPalette(help_pal);
         }
         QTextCharFormat body_fmt;
-        body_fmt.setForeground(QColor(QStringLiteral("#FFFFFF")));
+        body_fmt.setForeground(QColor(QStringLiteral("#26394B")));
 
         QString header = "Usage:  rigor-qt [command-line options]                     \n";
         QTextCursor cursor(ui->helpMessage->document());

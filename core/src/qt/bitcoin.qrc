@@ -94,6 +94,7 @@
     <qresource prefix="/images">
         <file alias="wallet-background">res/images/wallet-background.png</file>
         <file alias="wallet-background-dark">res/images/wallet-background-dark.png</file>
+        <file alias="paper_grain">res/images/paper_grain.png</file>
         <!-- Splash is painted at runtime (splashscreen.cpp); no bitmap splash shipped. -->
     </qresource>
 </RCC>

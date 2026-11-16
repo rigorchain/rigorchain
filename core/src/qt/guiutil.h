@@ -473,8 +473,20 @@ namespace GUIUtil
         return false;
     }
 
-    /** Rigor wallet-wide dark chrome (main window, wallet stack, RPC console). */
+    /** Rigor parchment chrome (main window, wallet stack, RPC console). */
     void ApplyRigorWalletChrome(QMainWindow* mainWindow, QWidget* walletFrame, QWidget* rpcConsole);
+
+    /**
+     * On Windows 11, tint the native caption. Windows 10 leaves the system caption unchanged.
+     * Does not replace the native frame.
+     */
+    void ApplyRigorNativeCaption(QWidget* widget);
+
+    /**
+     * Replace the system caption with the console parchment (#E3D1B8).
+     * Keeps drag, edge resize, and minimize / maximize / close.
+     */
+    void InstallRigorParchmentCaption(QWidget* window);
 
     /** High-contrast control stylesheet for dialogs (Create Wallet, etc.). */
     QString RigorDialogControlStylesheet();

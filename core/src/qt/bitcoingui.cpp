@@ -53,6 +53,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QAbstractItemView>
 #include <QComboBox>
 #include <QDebug>
 #include <QElapsedTimer>
@@ -213,7 +214,7 @@ RigorGUI::RigorGUI(interfaces::Node& node, const PlatformStyle *_platformStyle, 
     QString curStyle = QApplication::style()->metaObject()->className();
     if(curStyle == "QWindowsStyle" || curStyle == "QWindowsXPStyle")
     {
-        progressBar->setStyleSheet("QProgressBar { background-color: #111111; border: 1px solid #333333; border-radius: 7px; padding: 1px; text-align: center; color: #FFFFFF; } QProgressBar::chunk { background: #FF6A2B; border-radius: 7px; margin: 0px; }");
+        progressBar->setStyleSheet("QProgressBar { background-color: #F3E6D0; border: 1px solid #8A7E6C; border-radius: 7px; padding: 1px; text-align: center; color: #26394B; } QProgressBar::chunk { background: #6A3018; border-radius: 7px; margin: 0px; }");
     }
 
     statusBar()->addWidget(progressBarLabel);
@@ -246,7 +247,7 @@ RigorGUI::RigorGUI(interfaces::Node& node, const PlatformStyle *_platformStyle, 
     GUIUtil::ApplyRigorWalletChrome(this, nullptr, rpcConsole);
 #endif
 
-    // Icons were created before dark palette/chrome; recolor to WindowText (#FFFFFF).
+    // Recolor functional icons to ballpoint ink. The logo file is not touched.
     overviewAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/overview"))));
     sendCoinsAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/send"))));
     receiveCoinsAction->setIcon(platformStyle->TextColorIcon(QIcon(QStringLiteral(":/icons/receiving_addresses"))));
@@ -635,10 +636,41 @@ void RigorGUI::createToolBars()
 {
     if(walletFrame)
     {
-        QToolBar *toolbar = addToolBar(tr("Tabs toolbar"));
+        QToolBar *toolbar = new QToolBar(tr("Tabs toolbar"), this);
+        addToolBar(Qt::LeftToolBarArea, toolbar);
         appToolBar = toolbar;
+        toolbar->setObjectName(QStringLiteral("RigorNavSidebar"));
         toolbar->setMovable(false);
+        toolbar->setFloatable(false);
+        toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
+        toolbar->setIconSize(QSize(20, 20));
         toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        toolbar->setFixedWidth(208);
+
+#ifdef ENABLE_WALLET
+        m_wallet_selector_label = new QLabel();
+        m_wallet_selector_label->setText(tr("Wallet:"));
+        m_wallet_selector = new QComboBox();
+        m_wallet_selector_label->setBuddy(m_wallet_selector);
+        m_wallet_selector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_wallet_selector->setMinimumContentsLength(8);
+        m_wallet_selector->setMaximumWidth(184);
+        m_wallet_selector->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        if (QAbstractItemView* popup = m_wallet_selector->view()) {
+            popup->setTextElideMode(Qt::ElideNone);
+            popup->setMinimumWidth(260);
+        }
+        connect(m_wallet_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, &RigorGUI::setCurrentWalletBySelectorIndex);
+
+        m_wallet_selector_label_action = appToolBar->addWidget(m_wallet_selector_label);
+        m_wallet_selector_action = appToolBar->addWidget(m_wallet_selector);
+        QAction* selector_rule = appToolBar->addSeparator();
+        selector_rule->setObjectName(QStringLiteral("RigorWalletSelectorRule"));
+
+        m_wallet_selector_label_action->setVisible(false);
+        m_wallet_selector_action->setVisible(false);
+        selector_rule->setVisible(false);
+#endif
         toolbar->addAction(overviewAction);
         toolbar->addAction(sendCoinsAction);
         toolbar->addAction(receiveCoinsAction);
@@ -646,26 +678,6 @@ void RigorGUI::createToolBars()
         toolbar->addAction(convergenceAction);
         toolbar->addAction(dualityStatisticsAction);
         overviewAction->setChecked(true);
-
-#ifdef ENABLE_WALLET
-        QWidget *spacer = new QWidget();
-        spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        toolbar->addWidget(spacer);
-
-        m_wallet_selector = new QComboBox();
-        m_wallet_selector->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        connect(m_wallet_selector, qOverload<int>(&QComboBox::currentIndexChanged), this, &RigorGUI::setCurrentWalletBySelectorIndex);
-
-        m_wallet_selector_label = new QLabel();
-        m_wallet_selector_label->setText(tr("Wallet:") + " ");
-        m_wallet_selector_label->setBuddy(m_wallet_selector);
-
-        m_wallet_selector_label_action = appToolBar->addWidget(m_wallet_selector_label);
-        m_wallet_selector_action = appToolBar->addWidget(m_wallet_selector);
-
-        m_wallet_selector_label_action->setVisible(false);
-        m_wallet_selector_action->setVisible(false);
-#endif
     }
 }
 
@@ -789,6 +801,9 @@ void RigorGUI::addWallet(WalletModel* walletModel)
     } else if (m_wallet_selector->count() == 1) {
         m_wallet_selector_label_action->setVisible(true);
         m_wallet_selector_action->setVisible(true);
+        if (QAction* rule = appToolBar->findChild<QAction*>(QStringLiteral("RigorWalletSelectorRule"))) {
+            rule->setVisible(true);
+        }
     }
 
     connect(wallet_view, &WalletView::outOfSyncWarningClicked, this, &RigorGUI::showModalOverlay);
@@ -822,6 +837,9 @@ void RigorGUI::removeWallet(WalletModel* walletModel)
     } else if (m_wallet_selector->count() == 1) {
         m_wallet_selector_label_action->setVisible(false);
         m_wallet_selector_action->setVisible(false);
+        if (QAction* rule = appToolBar->findChild<QAction*>(QStringLiteral("RigorWalletSelectorRule"))) {
+            rule->setVisible(false);
+        }
     }
     rpcConsole->removeWallet(walletModel);
     walletFrame->removeWallet(walletModel);
@@ -1510,6 +1528,7 @@ void RigorGUI::closeEvent(QCloseEvent *event)
 
 void RigorGUI::showEvent(QShowEvent *event)
 {
+    GUIUtil::ApplyRigorNativeCaption(this);
     // enable the debug window when the main window shows up
     openRPCConsoleAction->setEnabled(true);
     aboutAction->setEnabled(true);
