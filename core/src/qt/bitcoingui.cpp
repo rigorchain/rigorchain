@@ -655,6 +655,24 @@ void RigorGUI::createToolBars()
         m_wallet_selector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         m_wallet_selector->setMinimumContentsLength(8);
         m_wallet_selector->setMaximumWidth(184);
+        // Same paper as the Receive page (QWidget#RigorWalletFrame). The
+        // platform style otherwise paints this wallet-name field white.
+        m_wallet_selector->setStyleSheet(QStringLiteral(
+            "QComboBox {"
+            "  background-color: #E3D1B8;"
+            "  color: #26394B;"
+            "  border: 1px solid #8A7E6C;"
+            "  border-radius: 4px;"
+            "  padding: 2px 6px;"
+            "}"
+            "QComboBox::drop-down { border: none; background: transparent; }"
+            "QComboBox QAbstractItemView {"
+            "  background-color: #E3D1B8;"
+            "  color: #26394B;"
+            "  selection-background-color: #C4B398;"
+            "  selection-color: #26394B;"
+            "}"
+        ));
         m_wallet_selector->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         if (QAbstractItemView* popup = m_wallet_selector->view()) {
             popup->setTextElideMode(Qt::ElideNone);

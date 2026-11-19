@@ -50,12 +50,15 @@ bool QRImageWidget::setQR(const QString& data, const QString& text)
         return false;
     }
 
+    // Light modules and the address band use the Receive page paper color
+    // from QWidget#RigorWalletFrame. Dark modules stay black.
+    const QRgb receive_paper = qRgb(0xE3, 0xD1, 0xB8);
     QImage qrImage = QImage(code->width + 8, code->width + 8, QImage::Format_RGB32);
-    qrImage.fill(0xffffff);
+    qrImage.fill(receive_paper);
     unsigned char *p = code->data;
     for (int y = 0; y < code->width; ++y) {
         for (int x = 0; x < code->width; ++x) {
-            qrImage.setPixel(x + 4, y + 4, ((*p & 1) ? 0x0 : 0xffffff));
+            qrImage.setPixel(x + 4, y + 4, ((*p & 1) ? 0x0 : receive_paper));
             ++p;
         }
     }
@@ -63,7 +66,7 @@ bool QRImageWidget::setQR(const QString& data, const QString& text)
 
     const int qr_image_size = QR_IMAGE_SIZE + (text.isEmpty() ? 0 : 2 * QR_IMAGE_MARGIN);
     QImage qrAddrImage(qr_image_size, qr_image_size, QImage::Format_RGB32);
-    qrAddrImage.fill(0xffffff);
+    qrAddrImage.fill(receive_paper);
     {
         QPainter painter(&qrAddrImage);
         painter.drawImage(QR_IMAGE_MARGIN, 0, qrImage.scaled(QR_IMAGE_SIZE, QR_IMAGE_SIZE));
